@@ -549,8 +549,11 @@ proc runRetreats(sim: var Sim) =
       survivors.add(moved)
   sim.board = newBoard(survivors)
 
-proc pledgeStabs(sim: var Sim): seq[Stab] =
-  ## A pledge is the only promise spectators can watch you break.
+proc pledgeStabs(sim: var Sim, board: Board): seq[Stab] =
+  ## A pledge is the only promise spectators can watch you break. It is
+  ## judged on the orders as they were WRITTEN, against the board they were
+  ## written on — the pre-movement board — so a stab that succeeds is
+  ## stamped exactly like one that bounces.
   for pledge in sim.pledges:
     var offence = ""
     case pledge.kind
@@ -574,7 +577,7 @@ proc pledgeStabs(sim: var Sim): seq[Stab] =
         if into < 0:
           continue
         let hostile =
-          (sim.board.hasUnit(into) and sim.board.unitAt(into).power == victim) or
+          (board.hasUnit(into) and board.unitAt(into).power == victim) or
           (isCity(into) and sim.owner[CityIndex[into]] == victim)
         if hostile:
           offence = order.text
@@ -592,8 +595,8 @@ proc pledgeStabs(sim: var Sim): seq[Stab] =
           continue
         if order.kind notin {okSupportHold, okSupportMove}:
           continue
-        if order.auxFrom >= 0 and sim.board.hasUnit(order.auxFrom) and
-            sim.board.unitAt(order.auxFrom).power == pledge.toPower:
+        if order.auxFrom >= 0 and board.hasUnit(order.auxFrom) and
+            board.unitAt(order.auxFrom).power == pledge.toPower:
           supported = true
       if not supported:
         offence = "supported no " & PowerAdjectives[max(pledge.toPower, 0)] &
@@ -768,10 +771,12 @@ proc resolveSeason(sim: var Sim) =
   for power in 0 ..< Powers:
     record.spends[power] = sim.spends[power]
 
-  ## Step 9 — retreats, decided by rule.
+  ## Step 9 — retreats, decided by rule. The pledges are read off the board
+  ## the orders were written against, so take it before movement is applied.
+  let preMovement = sim.board
+  sim.lastStabs = sim.pledgeStabs(preMovement)
   sim.runRetreats()
   battle.retreats = sim.lastRetreats
-  sim.lastStabs = sim.pledgeStabs()
   battle.stabs = sim.lastStabs
   sim.addEvent(battle)
   sim.history.add(record)

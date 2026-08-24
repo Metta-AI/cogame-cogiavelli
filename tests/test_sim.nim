@@ -439,4 +439,49 @@ block retreatRules:
   check(retreat.to != PER, "nor to an occupied province")
   check(retreat.to == ABR, "it takes the legal destination nearest home")
 
+block pledgeStabsAreJudgedOnTheBoardTheOrdersWereWrittenOn:
+  ## design.md:388 — peace is broken when the orders MOVE a unit into a
+  ## province occupied by the pledgee's unit. A stab that succeeds emptied
+  ## that province by the time the movement is applied, so judging it on
+  ## the post-movement board would stamp only the ones that bounced.
+  var sim = initSim(newConfig(press = true, years = 4))
+  let pledger = sim.powerOf[0]
+  let victim = sim.powerOf[1]
+  sim.board = newBoard(@[
+    Unit(power: pledger, kind: ukArmy, province: VER),
+    Unit(power: pledger, kind: ukArmy, province: MOD),
+    Unit(power: victim, kind: ukArmy, province: MAN)
+  ])
+  check(not isCity(MAN), "Mantua is not a city, so only the unit can be seen")
+  for seat in sim.pendingSeats():
+    if seat == 0:
+      sim.applyPress(seat, "", @[],
+        @[Pledge(fromPower: pledger, toPower: victim, kind: plPeace,
+          province: -1)], "", true)
+    else:
+      sim.applyPress(seat, "", @[], @[], "", true)
+  check(sim.phase == phOrders, "the press window closed")
+  for seat in sim.pendingSeats():
+    if sim.done:
+      break
+    case seat
+    of 0:
+      sim.applyOrders(seat, @["A VER - MAN", "A MOD S A VER - MAN"], @[], @[],
+        "", true)
+    of 1:
+      sim.applyOrders(seat, @["A MAN H"], @[], @[], "", true)
+    else:
+      sim.applyOrders(seat, @[], @[], @[], "", true)
+  var battle: GameEvent
+  for event in sim.events:
+    if event.kind == evBattle:
+      battle = event
+  check(battle.dislodged.len == 1 and battle.dislodged[0].unit == MAN,
+    "the supported move dislodged the pledgee's army in Mantua")
+  check(battle.stabs.len == 1, "the broken peace is stamped exactly once, got " &
+    $battle.stabs.len)
+  check(battle.stabs[0].power == pledger and battle.stabs[0].kind == plPeace,
+    "and it names the pledger and the pledge it broke")
+  check(battle.stabs[0].pledgeTo == victim, "and who was stabbed")
+
 echo "test_sim: ok"
