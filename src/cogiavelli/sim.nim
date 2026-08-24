@@ -1444,8 +1444,11 @@ proc eventFromJson*(node: JsonNode): GameEvent =
 proc replayMatch*(config: GameConfig, events: seq[GameEvent]): seq[Sim] =
   ## Re-derives the state timeline from a recorded event log: the press and
   ## orders events are replayed through the rules, and every derived event
-  ## — including every shock draw — is checked against the seeded
-  ## re-derivation. frames[i] = state after events[0 ..< i].
+  ## is checked against the seeded re-derivation — every shock draw AND
+  ## every recorded board snapshot (the `start`, `season`, `cities`,
+  ## `winter` and `end` events carry the units, the city owners, the city
+  ## counts and the treasuries), so a tampered board is caught as surely as
+  ## a tampered die. frames[i] = state after events[0 ..< i].
   var sim = initSim(config)
   var base = sim
   base.events = @[]
@@ -1473,6 +1476,23 @@ proc replayMatch*(config: GameConfig, events: seq[GameEvent]): seq[Sim] =
         "replay diverges at event " & $consumed & ": expected " &
           $logged.kind & ", log has " & $event.kind)
     case event.kind
+    of evStart:
+      if logged.units != event.units or logged.owners != event.owners or
+          logged.treasury != event.treasury:
+        raise newException(CogiavelliError,
+          "recorded opening board disagrees with the re-derivation")
+    of evSeason:
+      if logged.units != event.units or logged.owners != event.owners or
+          logged.treasury != event.treasury or
+          logged.cityCounts != event.cityCounts:
+        raise newException(CogiavelliError,
+          "recorded season board disagrees with the re-derivation")
+    of evCities:
+      if logged.owners != event.owners or
+          logged.cityCounts != event.cityCounts or
+          logged.gained != event.gained or logged.lost != event.lost:
+        raise newException(CogiavelliError,
+          "recorded city table disagrees with the re-derivation")
     of evFamine:
       if logged.provinces != event.provinces:
         raise newException(CogiavelliError,
@@ -1495,6 +1515,17 @@ proc replayMatch*(config: GameConfig, events: seq[GameEvent]): seq[Sim] =
           if logged.rebellions[index].roll != event.rebellions[index].roll:
             raise newException(CogiavelliError,
               "recorded rebellion roll disagrees with the seeded stream")
+      if logged.units != event.units or logged.owners != event.owners or
+          logged.treasury != event.treasury or
+          logged.cityCounts != event.cityCounts:
+        raise newException(CogiavelliError,
+          "recorded Winter board disagrees with the re-derivation")
+    of evEnd:
+      if logged.cities != event.cities or
+          logged.treasury != event.treasury or
+          logged.conqueror != event.conqueror:
+        raise newException(CogiavelliError,
+          "recorded final table disagrees with the re-derivation")
     else:
       discard
     consumed.inc

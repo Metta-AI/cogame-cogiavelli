@@ -320,6 +320,66 @@ block replayRaisesOnAnAlteredDraw:
     raised = true
   check(raised, "replayMatch raises when a recorded draw is altered")
 
+block replayChecksEveryRecordedBoardSnapshot:
+  ## Item 2 of the acceptance checklist: the recorded per-tick state is
+  ## compared with the re-derivation frame by frame, not just the dice. A
+  ## tampered board snapshot must raise exactly as a tampered draw does.
+  let sim = playOut(newConfig(seed = 15, years = 1))
+  proc raisesWith(config: GameConfig, events: seq[GameEvent]): bool =
+    try:
+      discard replayMatch(config, events)
+      return false
+    except CogiavelliError:
+      return true
+  check(not raisesWith(sim.config, sim.events),
+    "the untampered log replays clean")
+
+  var movedUnit = sim.events
+  var touched = false
+  for index in 0 ..< movedUnit.len:
+    if movedUnit[index].kind == evSeason and movedUnit[index].units.len > 0:
+      movedUnit[index].units[0].province = ABR
+      touched = true
+      break
+  check(touched, "the log carries a season board to tamper with")
+  check(raisesWith(sim.config, movedUnit),
+    "a moved unit in a season snapshot raises")
+
+  var richer = sim.events
+  touched = false
+  for index in 0 ..< richer.len:
+    if richer[index].kind == evSeason and richer[index].treasury.len > 0:
+      richer[index].treasury[0] += 5
+      touched = true
+      break
+  check(touched, "the log carries a treasury to tamper with")
+  check(raisesWith(sim.config, richer),
+    "an invented ducat in a season snapshot raises")
+
+  var stolenCity = sim.events
+  touched = false
+  for index in 0 ..< stolenCity.len:
+    if stolenCity[index].kind == evCities and stolenCity[index].owners.len > 0:
+      stolenCity[index].owners[0] = (stolenCity[index].owners[0] + 1) mod Powers
+      stolenCity[index].cityCounts[0] += 1
+      touched = true
+      break
+  check(touched, "the log carries a city table to tamper with")
+  check(raisesWith(sim.config, stolenCity),
+    "a stolen city in a cities snapshot raises")
+
+  var winterBoard = sim.events
+  touched = false
+  for index in 0 ..< winterBoard.len:
+    if winterBoard[index].kind == evWinter and
+        winterBoard[index].units.len > 0:
+      winterBoard[index].units.delete(0)
+      touched = true
+      break
+  check(touched, "the log carries a Winter board to tamper with")
+  check(raisesWith(sim.config, winterBoard),
+    "a vanished unit in a Winter snapshot raises")
+
 block seedDeterminism:
   let one = initSim(newConfig(seed = 21))
   let two = initSim(newConfig(seed = 21))
