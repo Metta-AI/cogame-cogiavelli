@@ -78,13 +78,19 @@ type
     timeoutSeconds: int
     disabled*: bool
 
+## FITTED, not chosen: every value below is the argmax of the grid in
+## `tools/tune_baseline.nim`, recorded in `docs/tuning.md` and re-checked by
+## `tests/test_tuning.nim` on every CI run. The design note's pre-tuning
+## figures were 12 / 20 for the condottiere's two treasury gates and 15 / 4
+## for the banker's defence; the sweep moved the first pair down to "bribe as
+## soon as you can afford it" and the second to "defend everything, cheaply".
 const ShippedBaseline* = BaselineParams(
-  bribeTreasury: 12,
-  buyTreasury: 20,
+  bribeTreasury: 8,
+  buyTreasury: 16,
   vacatePenalty: 1,
   autumnVacatePenalty: 2,
-  defendTreasury: 15,
-  defendAmount: 4,
+  defendTreasury: 10,
+  defendAmount: 2,
   buildTreasury: 30
 )
 

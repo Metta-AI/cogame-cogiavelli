@@ -30,6 +30,22 @@ const
   SweepSeeds* = [1, 2, 3, 4]
   SweepYears* = 3
 
+const
+  ## The fixed field every candidate is measured against: the baselines as
+  ## they stood before the sweep (the design note's stated constants). It
+  ## is deliberately NOT `ShippedBaseline` — pinning the opponents makes
+  ## the grid a fixed target, so adopting a fitted point cannot move the
+  ## post it was fitted to.
+  ReferenceBaseline* = BaselineParams(
+    bribeTreasury: 12,
+    buyTreasury: 20,
+    vacatePenalty: 1,
+    autumnVacatePenalty: 2,
+    defendTreasury: 15,
+    defendAmount: 4,
+    buildTreasury: 30
+  )
+
 type
   SweepPoint* = object
     params*: BaselineParams
@@ -78,13 +94,14 @@ proc tableOf(candidateSeat: int, candidate: ScriptKind,
     tuple[kinds: seq[ScriptKind], params: seq[BaselineParams]] =
   for seat in 0 ..< 6:
     result.kinds.add(if seat == candidateSeat: candidate else: opponent)
-    result.params.add(if seat == candidateSeat: params else: ShippedBaseline)
+    result.params.add(if seat == candidateSeat: params
+                      else: ReferenceBaseline)
 
 proc condottiereFitness*(params: BaselineParams): float =
-  ## Seat 5 plays the candidate expander; the other five play the SHIPPED
-  ## baselines. Two tables per seed — against the wall it has to break, and
-  ## against its own kind — scored by the game's own score, which is what
-  ## the league ranks by.
+  ## Seat 5 plays the candidate expander; the other five play the
+  ## REFERENCE baselines. Two tables per seed — against the wall it has to
+  ## break, and against its own kind — scored by the game's own score,
+  ## which is what the league ranks by.
   var total = 0.0
   for seed in SweepSeeds:
     for opponent in [skBanker, skCondottiere]:
@@ -95,7 +112,7 @@ proc condottiereFitness*(params: BaselineParams): float =
   total / float(SweepSeeds.len * 2)
 
 proc bankerFitness*(params: BaselineParams): float =
-  ## Seat 0 plays the candidate wall against five shipped condottieri: the
+  ## Seat 0 plays the candidate wall against five reference condottieri: the
   ## wall is judged on how much of Italy and how many ducats it still has
   ## when the expanders are done with it.
   var total = 0.0
