@@ -311,10 +311,13 @@ proc beginSeason*(sim: var Sim) =
     var land: seq[int]
     for province in 0 ..< NumLand:
       land.add(province)
-    while sim.famine.len < FamineProvinces:
-      let draw = land[sim.shockRng.rand(land.high)]
-      if draw notin sim.famine:
-        sim.famine.add(draw)
+    ## EXACTLY FamineProvinces draws, as design.md:294-296 specifies the
+    ## shock stream: draw without replacement instead of rejecting
+    ## collisions, so the stream advances by a fixed, auditable count.
+    for _ in 0 ..< FamineProvinces:
+      let index = sim.shockRng.rand(land.high)
+      sim.famine.add(land[index])
+      land.delete(index)
     var event = sim.blankEvent(evFamine)
     event.phaseKind = phPress
     event.provinces = sim.famine

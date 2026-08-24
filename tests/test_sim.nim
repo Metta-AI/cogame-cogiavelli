@@ -3,7 +3,7 @@
 ## and the replay.
 
 import
-  std/[json, strutils, unicode],
+  std/[json, random, strutils, unicode],
   cogiavelli/[sim, llm]
 
 proc check(condition: bool, message: string) =
@@ -483,5 +483,26 @@ block pledgeStabsAreJudgedOnTheBoardTheOrdersWereWrittenOn:
   check(battle.stabs[0].power == pledger and battle.stabs[0].kind == plPeace,
     "and it names the pledger and the pledge it broke")
   check(battle.stabs[0].pledgeTo == victim, "and who was stabbed")
+
+block famineTakesExactlyTwoDrawsFromTheShockStream:
+  ## design.md:294-296 pins the stream: "(1) Spring famine, 2 draws". The
+  ## year's famine must therefore be the first two draws of the seeded
+  ## stream, drawn without replacement — a rejection loop would consume a
+  ## third draw whenever the two collided and slide everything after it.
+  let config = newConfig(seed = 17, years = 1)
+  let sim = initSim(config)
+  var rng = initRand(int64(config.seed) * 104729 + 7)
+  var land: seq[int]
+  for province in 0 ..< NumLand:
+    land.add(province)
+  var expected: seq[int]
+  for _ in 0 ..< FamineProvinces:
+    let index = rng.rand(land.high)
+    expected.add(land[index])
+    land.delete(index)
+  check(sim.famine == expected,
+    "the famine is exactly the first two draws of the shock stream")
+  check(sim.famine.len == FamineProvinces and sim.famine[0] != sim.famine[1],
+    "and they are two distinct land provinces")
 
 echo "test_sim: ok"
