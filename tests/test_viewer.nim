@@ -213,8 +213,9 @@ block endcardColumnsAndLedger:
   check("function animateEndcard" in renderer and "1000)" in renderer,
     "the ledger walks a year a second")
   let css = readFile(repoDir() / "client" / "chrome.css")
-  check(".end-rows { grid-template-columns: auto 1fr auto auto auto auto auto; }"
-    in css, "the endcard grid has all seven columns")
+  const sevenColumns =
+    ".end-rows { grid-template-columns: auto 1fr auto auto auto auto auto; }"
+  check(sevenColumns in css, "the endcard grid has all seven columns")
   check(".end-ledger-year.on { display: grid; }" in css,
     "one ledger year is visible at a time")
 
