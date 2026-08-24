@@ -60,8 +60,25 @@ proc play(config: GameConfig, kinds: seq[ScriptKind]): Audit =
 
 proc auditEpisode(audit: Audit) =
   let sim = audit.sim
-  check(sim.reason == "complete" or sim.reason == "conquest",
-    "a scripted table always reaches an end condition, got " & sim.reason)
+  check(sim.done, "a scripted table always reaches an end condition")
+  if sim.conqueror >= 0:
+    ## The only other natural end: somebody actually took Italy. Assert the
+    ## condition, not just the word.
+    check(sim.reason == "conquest", "a named conqueror means a conquest")
+    var holders = 0
+    for power in 0 ..< Powers:
+      if sim.citiesOf(power) > 0:
+        holders.inc
+    check(sim.citiesOf(sim.conqueror) >= VictoryCities or holders == 1,
+      "a conquest is twelve cities or the last power owning any, got " &
+        $sim.citiesOf(sim.conqueror) & " cities and " & $holders & " holders")
+  else:
+    check(sim.reason == "complete",
+      "a scripted table with no conqueror plays every year out, got " &
+        sim.reason)
+    check(sim.yearsPlayed == sim.config.years,
+      "and it played all of them, got " & $sim.yearsPlayed & "/" &
+        $sim.config.years)
   for event in sim.events:
     case event.kind
     of evOrders:
@@ -96,6 +113,21 @@ proc auditEpisode(audit: Audit) =
       discard
   for power in 0 ..< Powers:
     check(sim.treasury[power] >= 0, "no treasury ends negative")
+
+block theCanonicalScriptedEpisodeCompletes:
+  ## Checklist item 7, in the letter: an all-scripted episode runs to the
+  ## natural end and `results.reason` is "complete". A single year puts
+  ## conquest arithmetically out of reach — six powers start on three
+  ## cities each and no power can reach twelve, or be the last holder, in
+  ## three seasons — so this fixture can only end one way.
+  var kinds: seq[ScriptKind]
+  for index in 0 ..< 6:
+    kinds.add(skCondottiere)
+  let audit = play(newConfig(3, 1, true), kinds)
+  check(audit.sim.resultsJson()["reason"].getStr() == "complete",
+    "the canonical scripted episode reports reason=complete, got " &
+      audit.sim.resultsJson()["reason"].getStr())
+  auditEpisode(audit)
 
 block condottiereSeeds:
   for seed in 1 .. 8:
