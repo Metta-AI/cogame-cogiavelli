@@ -380,6 +380,21 @@ block replayChecksEveryRecordedBoardSnapshot:
   check(raisesWith(sim.config, winterBoard),
     "a vanished unit in a Winter snapshot raises")
 
+  var shortRebellions = sim.events
+  touched = false
+  for index in 0 ..< shortRebellions.len:
+    if shortRebellions[index].kind == evWinter:
+      if shortRebellions[index].rebellions.len > 0:
+        shortRebellions[index].rebellions.delete(0)
+      else:
+        shortRebellions[index].rebellions.add(
+          Rebellion(city: Cities[0], power: 0, roll: RebellionFace))
+      touched = true
+      break
+  check(touched, "the log carries a Winter event to tamper with")
+  check(raisesWith(sim.config, shortRebellions),
+    "a rebellion-roll list of a different length raises too")
+
 block seedDeterminism:
   let one = initSim(newConfig(seed = 21))
   let two = initSim(newConfig(seed = 21))

@@ -1510,11 +1510,14 @@ proc replayMatch*(config: GameConfig, events: seq[GameEvent]): seq[Sim] =
       if logged.incomeDraws != event.incomeDraws:
         raise newException(CogiavelliError,
           "recorded income draws disagree with the seeded stream")
-      if logged.rebellions.len == event.rebellions.len:
-        for index in 0 ..< event.rebellions.len:
-          if logged.rebellions[index].roll != event.rebellions[index].roll:
-            raise newException(CogiavelliError,
-              "recorded rebellion roll disagrees with the seeded stream")
+      if logged.rebellions.len != event.rebellions.len:
+        raise newException(CogiavelliError,
+          "recorded rebellion count disagrees with the seeded stream")
+      for index in 0 ..< event.rebellions.len:
+        if logged.rebellions[index].roll != event.rebellions[index].roll or
+            logged.rebellions[index].city != event.rebellions[index].city:
+          raise newException(CogiavelliError,
+            "recorded rebellion roll disagrees with the seeded stream")
       if logged.units != event.units or logged.owners != event.owners or
           logged.treasury != event.treasury or
           logged.cityCounts != event.cityCounts:
