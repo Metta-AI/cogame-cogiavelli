@@ -448,7 +448,12 @@ proc conquestCheck(sim: var Sim) =
   var leader = -1
   var holders = 0
   for power in 0 ..< Powers:
-    if counts[power] >= VictoryCities:
+    ## Two powers can only both stand at 12 by splitting all 24 between
+    ## them; the larger holding takes it, and a dead-level split goes to
+    ## the lower power index so the conqueror is never an artefact of the
+    ## loop's overwrite order.
+    if counts[power] >= VictoryCities and
+        (leader < 0 or counts[power] > counts[leader]):
       leader = power
     if counts[power] > 0:
       holders.inc

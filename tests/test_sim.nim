@@ -505,4 +505,26 @@ block famineTakesExactlyTwoDrawsFromTheShockStream:
   check(sim.famine.len == FamineProvinces and sim.famine[0] != sim.famine[1],
     "and they are two distinct land provinces")
 
+block conquestTieGoesToTheLowerPowerIndex:
+  ## 12 + 12 = 24 = every city: the only reachable tie. It must not be
+  ## settled by whichever power the loop happened to write last.
+  var sim = initSim(newConfig(years = 4, press = false))
+  let first = min(sim.powerOf[0], sim.powerOf[1])
+  let second = max(sim.powerOf[0], sim.powerOf[1])
+  var units: seq[Unit]
+  for slot, city in Cities:
+    let owner = if slot < VictoryCities: second else: first
+    sim.owner[slot] = owner
+    units.add(Unit(power: owner, kind: ukArmy, province: city))
+  sim.board = newBoard(units)
+  for seat in sim.pendingSeats():
+    if sim.done:
+      break
+    ## No orders at all: every unit holds, so nothing changes hands and the
+    ## split is still exactly even when step 10 checks it.
+    sim.applyOrders(seat, @[], @[], @[], "", true)
+  check(sim.reason == "conquest", "a twelve-all split still ends the episode")
+  check(sim.conqueror == first,
+    "the lower power index takes a dead-level split, got " & $sim.conqueror)
+
 echo "test_sim: ok"
