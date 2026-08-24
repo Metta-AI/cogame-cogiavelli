@@ -1,0 +1,7 @@
+services:
+  cogiavelli:
+    image: coworld-cogiavelli:latest
+    platform: linux/amd64
+    build:
+      context: .
+      network: host

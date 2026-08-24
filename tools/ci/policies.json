@@ -1,0 +1,35 @@
+[
+  {
+    "name": "cogiavelli-medici",
+    "run": "/bin/cogiavelli-player",
+    "env": {
+      "USE_BEDROCK": "true",
+      "PLAYER_PROMPT": "Play like a banker who happens to own an army. Ducats first: your vault is a weapon that never bounces. Open by walking a unit into the nearest NEUTRAL city and leaving it garrisoned, because an empty city rebels in Winter and a garrisoned one pays three ducats a year forever. Keep at least fifteen ducats in reserve from Summer onward. When a neighbour's army stands in or beside a city you own, buy it: fifteen ducats to make it yours is cheaper than two campaigns to kill it, and a bought unit is a unit your rival no longer has. Spend nine to disband anything you cannot use. Put four ducats of loyalty on any of your own units that sits alone in a city a rich neighbour could reach - a defended unit costs the briber more than it costs you. Do not buy daggers early; an assassination is worth it only when one power is clearly running away with the board and freezing its court for a season stops a conquest. GIFT to buy time, not friendship: a gift is the only promise in this game that cannot be broken, so use it to pay a strong neighbour to look elsewhere in the season you are exposed, and say so plainly in your letters. Promise peace to the strongest power and pledge it, so spectators can see you keep it, and keep it until you can afford not to. Build late, in coastal cities, and never let your unit count outrun your income."
+    }
+  },
+  {
+    "name": "cogiavelli-borgia",
+    "run": "/bin/cogiavelli-player",
+    "env": {
+      "USE_BEDROCK": "true",
+      "PLAYER_PROMPT": "Play for the twelve cities, not for the vault: money you die holding scores less than one city. Open at pace - take the neutral cities within reach in the first year, always with a supported attack rather than a lone move, because equal strength means a standoff and a wasted season. Concentrate: two units taking one province beat two units taking none. Write warm letters to everyone and pledge peace to the neighbour you intend to hit LAST, never to the one you intend to hit next - a pledge you break is stamped STAB on the replay and it makes the whole table your enemy. When you do stab, stab in Autumn: the cities you take are the ones that pay you all Winter. Bribe to break a defence, not to buy a friend: nine ducats to disband the single unit holding the city you want is the cheapest supported attack in the game, and fifteen to turn it round is better still when the unit is already standing where you need one. Pay eighteen or more for a dagger the moment a rival passes eight cities - freezing its court for a season is a free supported attack against every one of its borders and it costs them nothing they can rebuild. Never leave a city you own empty going into Winter. Keep enough ducats to pay upkeep and build every Winter you can; an army you cannot pay for disbands itself."
+    },
+    "player": "ply_bac48eb1-662e-44f8-973d-f3e016dccf5d"
+  },
+  {
+    "name": "cogiavelli-condottiere",
+    "run": "/bin/cogiavelli-player",
+    "env": {
+      "USE_BEDROCK": "true",
+      "PLAYER_SCRIPTED": "condottiere"
+    }
+  },
+  {
+    "name": "cogiavelli-banker",
+    "run": "/bin/cogiavelli-player",
+    "env": {
+      "USE_BEDROCK": "true",
+      "PLAYER_SCRIPTED": "banker"
+    }
+  }
+]

@@ -1,0 +1,466 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Metta-AI/coworld/main/src/coworld/coworld_manifest_schema.json",
+  "tags": [
+    "diplomacy",
+    "negotiation",
+    "bribery",
+    "llm-driven",
+    "turn-based",
+    "six-player",
+    "mixed-motive"
+  ],
+  "episode_timeout_minutes": 20,
+  "game": {
+    "name": "cogiavelli",
+    "replay_viewer": {
+      "bundle": "static-replay-viewer"
+    },
+    "description": "Cogiavelli: Diplomacy's adjudicator on a Renaissance-Italy board, with a treasury bolted on. Six LLM-piloted powers - VENICE, MILAN, FLORENCE, the PAPACY, NAPLES and the TURK - contend for twenty-four Italian cities across three seasons a year. Every season each power writes press (non-binding), then submits, at the same moment as everyone else, one order per unit AND an expenditure sheet. Orders are Diplomacy's: HOLD, MOVE, SUPPORT and CONVOY, resolved by the full standard adjudicator (four strengths, cut supports, circular movement, the Szykman rule for convoy paradoxes). The expenditure sheet is what Diplomacy leaves out: GIFTS of ducats arrive instantly and irrevocably - the only promise in the game that cannot be broken; BRIBES disband an enemy unit for 9 ducats or buy it outright for 15; DEFEND payments raise what a briber must beat; and an ASSASSINATION of 6 to 30 ducats buys a two-dice roll that, if it lands, freezes a rival's whole court for a season. Money resolves BEFORE the armies move and is spent whether or not it works, and every ducat is published. Italy bites back: famine marks two provinces each Spring, plague empties one city each Summer, neglected cities rebel in Winter, and every unit costs upkeep. Whoever occupies a city owns it from that moment; hold 12 of the 24 and you win outright, otherwise you are scored on city share plus what is left in your vault. Seats play under anonymous power names and cog aliases, so no policy can recognise a counterparty across episodes and every side deal has to be paid for on the board. The game is LLM-driven: the server sends each seat's policy prompt plus the board, the city table, every treasury, the two-year ledger, the press it received, the complete list of its legal orders and the exact price of every bribable enemy unit to Claude - so A POLICY IS JUST A PROMPT: build one by reusing the published player runnable and setting the PLAYER_PROMPT environment variable. Two scripted baselines (condottiere, banker) play any seat that registers as scripted, and every seat when no LLM credentials are available, so episodes always complete.",
+    "owner": "daveey@gmail.com",
+    "runnable": {
+      "type": "game",
+      "image": "{{COGIAVELLI_IMAGE}}",
+      "run": [
+        "/bin/cogiavelli"
+      ],
+      "env": {
+        "ANTHROPIC_API_KEY_URI": "secret://coworld/cogiavelli/anthropic_api_key"
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-cogiavelli/tree/main"
+    },
+    "config_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tokens",
+        "players"
+      ],
+      "properties": {
+        "tokens": {
+          "description": "One connection token per player slot, indexed by slot.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "players": {
+          "description": "One player display-name object per seat, indexed by slot. Policy names are spectator-side only; in game a seat is a power name and a cog alias.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "num_agents": {
+          "description": "Seat count; injected by the commissioner. Cogiavelli is a six-power game and has no other seat count.",
+          "type": "integer",
+          "minimum": 6,
+          "maximum": 6
+        },
+        "seed": {
+          "description": "Pins the seat-to-power permutation, the cog aliases and the whole server-side shock stream (famine, daggers, plague, rebellions, income draws). Omit for a fresh random seed per episode.",
+          "type": "integer"
+        },
+        "years": {
+          "description": "Years played, starting at 1499. Each year is three seasons plus Winter.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 4
+        },
+        "press": {
+          "description": "Whether the press window runs. False is the gunboat variant: only ducats and orders speak.",
+          "type": "boolean",
+          "default": true
+        },
+        "episodeTimeoutSeconds": {
+          "description": "Wall-clock the game assumes the platform allows an episode when COWORLD_TIMEOUT_SECONDS is not in its environment; play stops between batches at 60% of it so results and the replay always land.",
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 6000,
+          "default": 1200
+        },
+        "turnDelayMs": {
+          "description": "Spectator pacing delay between phases, bounded in total by the episode's pacing budget.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000,
+          "default": 300
+        },
+        "model": {
+          "description": "Claude model that drives every seat over the direct Anthropic transport.",
+          "type": "string",
+          "default": "claude-sonnet-5"
+        },
+        "maxOutputTokens": {
+          "type": "integer",
+          "minimum": 64,
+          "maximum": 2000,
+          "default": 1200
+        },
+        "llmTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 300,
+          "default": 45
+        },
+        "player_connect_timeout_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "default": 180
+        }
+      }
+    },
+    "results_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "names",
+        "powers",
+        "scores",
+        "cities",
+        "ducats",
+        "units",
+        "spent",
+        "received",
+        "years",
+        "maxYears",
+        "conqueror",
+        "reason"
+      ],
+      "properties": {
+        "names": {
+          "description": "Policy display names, indexed by slot. Seats play under anonymous power names and cog aliases in game; results attribute by policy name.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "string"
+          }
+        },
+        "powers": {
+          "description": "The power each slot played, indexed by slot.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "string"
+          }
+        },
+        "scores": {
+          "description": "Conquest scores 1.0 for the conqueror and 0.0 for everyone else; otherwise (cities + min(ducats, 24) / 24) / 24.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "cities": {
+          "description": "Cities owned at the end, of 24.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "ducats": {
+          "description": "Ducats left in the vault.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "units": {
+          "description": "Units on the board at the end.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "spent": {
+          "description": "Ducats paid out over the episode: gifts, bribes, defences and daggers.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "received": {
+          "description": "Ducats received as gifts over the episode.",
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "years": {
+          "description": "Years actually played.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxYears": {
+          "description": "The episode's configured year count.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "conqueror": {
+          "description": "The power that took 12 cities, or an empty string.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "How the episode ended: conquest, complete or deadline.",
+          "type": "string"
+        }
+      }
+    },
+    "protocols": {
+      "player": {
+        "type": "text",
+        "value": "cogiavelli.player.v1 - JSON text frames over the websocket named by COWORLD_PLAYER_WS_URL (already carrying ?slot=N&token=T). A Cogiavelli policy is a prompt: the player container's only job is to deliver it; the game server makes every decision by sending that prompt plus the seat's view to Claude, as ONE parallel batch per phase for all six seats. game->player frames: {\"type\":\"welcome\",\"protocol\":\"cogiavelli.player.v1\",\"slot\":N,\"power\":\"VENICE\",\"name\":\"Sprocket\",\"years\":int,\"press\":bool} on connect; {\"type\":\"state\",\"slot\":N,\"power\":str,\"year\":int,\"season\":spring|summer|autumn|winter,\"phase\":press|orders|resolve|winter,\"years\":int,\"yearsPlayed\":int,\"cities\":int,\"ducats\":int,\"units\":[own units],\"board\":[every unit],\"owners\":[24 city rows],\"counts\":[6],\"treasuries\":[6],\"famine\":[codes],\"plague\":code,\"paralysed\":bool,\"inbox\":[{from,text,public}],\"eliminated\":bool,\"started\":bool,\"done\":bool,\"reason\":str} after every event - REDACTED: the whole public board, the public city table and every treasury are visible, but no other power's pending orders, pending expenditure, private letters or notes ever are; {\"type\":\"final\",\"done\":true,\"slot\":N,\"scores\":[6],\"cities\":[6],\"ducats\":[6],\"units\":[6],\"powers\":[6],\"names\":[6 cog aliases],\"years\":int,\"reason\":str,\"conqueror\":str} at episode end, after which the player should exit. player->game frames: {\"type\":\"prompt\",\"prompt\":str,\"scripted\":str} - the prompt (at most 4000 runes) IS the policy; send it after connect and again after welcome; the latest frame applies to all later calls. \"scripted\" is \"condottiere\" (or \"1\"/\"true\"/\"yes\") for the scripted expander, \"banker\" (or \"miser\") for the scripted hoarder, and \"\" for an LLM-driven seat. The published cogiavelli-player runnable reads its prompt from PLAYER_PROMPT and its baseline from PLAYER_SCRIPTED, so a new policy is `coworld upload-policy` of the same image with --secret-env PLAYER_PROMPT=\"<your strategy>\"."
+      },
+      "global": {
+        "type": "text",
+        "value": "Global spectators connect a websocket to /global and receive the full snapshot as JSON after every event: {\"type\":\"state\",\"game\":\"cogiavelli\",\"seats\":[{power,name,cities,units,ducats,score,pending,eliminated,paralysed,stabbedThisTurn,spentTotal,receivedTotal,broadcast,lettersOut,pledges,notes} x6 by seat],\"seatOfPower\":[6],\"units\":[{power,kind,province,dislodged,bought}],\"owners\":[{city,power} x24],\"arrows\":[{kind,from,to,aux,power,outcome}],\"purses\":[{from,to,kind,amount,outcome}],\"daggers\":[{from,target,amount,d1,d2,roll,success}],\"gifts\":[{from,to,amount}],\"famine\":[codes],\"plague\":code,\"rebellions\":[{city,power,roll}],\"stabs\":[{power,pledgeTo,kind,order}],\"standoffs\":[codes],\"year\":int,\"season\":str,\"phase\":str,\"years\":int,\"yearsPlayed\":int,\"counts\":[[6]],\"treasuries\":[[6]],\"press\":[{from,to,text,public}],\"gameDone\":bool,\"reason\":str,\"conqueror\":str,\"policyNames\":[6],\"events\":[...],\"started\":bool,\"done\":bool,\"connected\":[bool]}. The events array is append-only and carries the complete transcript in thirteen flat kinds - start, season, famine, press, orders, spend, assassin, bribe, battle, cities, plague, winter, end - INCLUDING every private letter, every pledge, every ledger entry and every shock draw, because the spectator name space sees everything the seats do not. Each event also carries the seeded draw that produced it (famine.provinces, assassin.d1/d2/roll, plague.province, winter.rebellions[].roll, winter.incomeDraws), so the dice can be checked against the outcome. The browser page at /client/global renders the live board; /client/replay plays a recorded episode; the static replay viewer bundle renders replays hosted by the platform (index.html?replay=<url>)."
+      }
+    },
+    "docs": {
+      "readme": {
+        "type": "text",
+        "value": "Cogiavelli is Diplomacy on a Renaissance-Italy board with a treasury bolted on: six LLM-piloted powers, twenty-four cities, three seasons a year, simultaneous orders - and an expenditure sheet submitted in the same breath as the orders. Ducats are the other army. A gift arrives and can never be taken back (the only binding promise in the game); nine ducats disband an enemy unit and fifteen buy it outright; a defence payment raises what a briber must beat; six to thirty ducats buy a two-dice roll at a rival's life, and a hit freezes their whole court for a season. Money resolves BEFORE the armies move and is spent whether or not it works. Between years famine starves provinces, plague empties a city, neglected cities rebel and every unit costs upkeep. Hold 12 of the 24 cities and you win outright; otherwise you are scored on your share of the cities plus what is left in your vault. A policy is just a prompt: field one by reusing the published cogiavelli-player runnable with PLAYER_PROMPT set to your strategy. With no LLM credentials (or for seats that register scripted) the server plays the condottiere or banker baselines, so episodes always complete."
+      },
+      "pages": [
+        {
+          "id": "rules.md",
+          "title": "rules.md",
+          "content": {
+            "type": "text",
+            "value": "# Cogiavelli rules\n\n## The calendar\n\nAn episode plays `years` years starting at 1499 (default 4, minimum 1, maximum 10). Each year is\nthree seasons - Spring, Summer, Autumn - and then Winter. Every season is one whole turn: a press\nwindow, a simultaneous orders-and-expenditure submission, and a resolution. Winter takes no decision\nfrom anybody: it executes the plans already written on the Autumn expenditure sheet.\n\n## The resolution order, numbered and complete\n\n1. FAMINE DRAW (Spring only). The server draws 2 distinct land provinces and announces them to\n   everyone at once. A famine province is marked for the whole year.\n2. PRESS WINDOW. All six powers write simultaneously, in one batch: one public broadcast, up to five\n   private letters (at most one per other power), up to four pledges, and private notes. Nothing said\n   here binds anything. A power paralysed by an assassination last season writes nothing this window;\n   letters addressed to it are still delivered. Skipped entirely when `press` is false.\n3. ORDERS AND EXPENDITURE. All six powers write simultaneously, in one batch: one order per unit they\n   own, a `spend` sheet of up to 6 entries, and (Autumn only) a `builds` list of up to 6 entries that\n   Winter will execute. Nobody sees anybody else's submission before it resolves.\n4. PAYMENT. For each power in power-index order, its spend entries are validated IN THE ORDER IT\n   LISTED THEM against its live treasury: an entry it cannot afford is dropped (`insufficient`); one\n   naming a nonexistent unit or power is dropped (`notarget`); a bribe on one's own unit or an\n   assassination on oneself is dropped (`illegal`). Every surviving entry is paid immediately - the\n   ducats leave the vault whether or not the entry works. A gift credits the recipient at this moment\n   and is irrevocable.\n5. ASSASSINATION. For each surviving attempt, in power-index order of the payer, the server draws two\n   dice: roll = 6*(d1-1)+d2, uniform on 1..36. The attempt succeeds iff roll <= amount, where amount\n   is the ducats paid, clamped to 6..30 - so 18 ducats is an even chance and 30 is the 30/36 ceiling.\n   On success the target is PARALYSED: every one of its units holds this season, and it writes no\n   press next season. Its treasury is untouched.\n6. BRIBES. All bribes resolve at once against the amounts paid in step 4. For a targeted unit U owned\n   by P, let `defence` be the total defend ducats P paid on U this season. A bribe of `amount` takes\n   effect iff amount >= Cost + defence, where Cost is 9 to disband and 15 to buy. If two or more\n   bribes on the same unit qualify, the strictly largest wins; an exact tie means ALL of them fail and\n   none of the money comes back. A bought unit changes sides where it stands and is forced to hold.\n7. ORDER REPAIR. Drop orders naming a unit the power no longer owns after step 6; where one unit is\n   ordered twice keep the first; replace every order of a paralysed power with a hold; give any\n   unordered unit a hold. Then check legality - a fleet ordered inland, an army into a sea, a move to\n   a non-adjacent area with no possible convoy path, a support whose destination is not adjacent to\n   the supporter, a support or convoy naming a unit that is not there, an army ordering a convoy, a\n   convoying fleet not at sea. EVERY ILLEGAL ORDER BECOMES A HOLD, with a one-word reason (parse,\n   nonadjacent, wrongunit, notthere, noconvoy, notowned). An illegal order never invalidates the rest\n   of a reply.\n8. MOVEMENT ADJUDICATION. The Diplomacy core, unchanged: void unmatched supports and convoys; find\n   convoy paths; resolve with the four standard strengths (hold, attack, defend, prevent) by the\n   recursive resolver of Kruijswijk's *The Math of Adjudication*; cut supports; two backup rules only\n   - circular movement and the Szykman rule for convoy paradoxes. Self-dislodgement is banned, and no\n   power may support a foreign attack that dislodges its own unit.\n9. RETREATS, decided by rule and not by a decision call. Each dislodged unit retreats to the legal\n   destination (adjacent on its own graph, empty after movement, not the attacker's origin, not a\n   standoff province) with the smallest hop distance to the nearest city its owner holds, ties broken\n   by ascending province code; if there is none it disbands. Two dislodged units contesting one\n   province: the lower province code takes it, the other re-picks or disbands.\n10. CITY OWNERSHIP. Every city occupied by a unit becomes that unit's power's, immediately, EVERY\n    SEASON - this is Machiavelli, not Diplomacy. Unoccupied cities keep their owner. The conquest\n    condition is checked here.\n11. PLAGUE (Summer only). The server draws 1 city province uniformly from the 24: every unit standing\n    in it is destroyed (no retreat, no compensation) and that city yields no income this year.\n12. SEASON ADVANCE.\n\nWinter, once per year after Autumn:\n\n- W1 REBELLIONS. For each power, for each non-home city it owns with no unit standing in it, a d6: on\n  a 1 the city rebels and reverts to unowned. Every roll is recorded.\n- W2 FAMINE STRIKES. Every unit standing in one of this year's two famine provinces disbands.\n- W3 INCOME. 3 ducats per city owned, excluding this year's famine and plague cities, plus a variable\n  draw of 0..3 ducats per power.\n- W4 UPKEEP. 1 ducat per unit. A power that cannot pay for all of them disbands units until it can -\n  the one furthest from the nearest city it owns first, ties by ascending province code.\n- W5 BUILDS. The Autumn `builds` list executes in order: 3 ducats each, into a VACANT CITY THE POWER\n  OWNS (any owned city, not only a home city); a fleet only in a coastal city.\n\nA power with zero units and zero cities after W5 is eliminated. It writes no press, receives no\norders call, and keeps whatever ducats it has - they still count for score.\n\n## Press and pledges\n\nPress is one exchange per season, not a conversation: all six write at once and letters are delivered\nbefore the same season's orders batch, so a letter can be acted on the season it is sent but only\nanswered the next one. Nothing said in press binds anything - only the expenditure sheet binds. A\npledge exists so that a betrayal is machine-detectable and therefore drawable:\n\n- peace, to a power: broken if your orders this season move any unit into a province that power\n  occupies or into a city it owns, or support any such move, or bribe or assassinate it.\n- keepout, over a province: broken if you order any unit into that province or support any move into\n  it.\n- support, to a power: broken if your orders contain no support of one of that power's units.\n\nA broken pledge is recorded as a `stab` inside the battle event and the viewer stamps STAB over the\noffender. Free-text promises with no pledge are legal and common - they simply cannot be stamped.\n\n## The shocks and their exact probabilities\n\nEvery random draw comes from ONE seeded server-side stream, advanced in exactly this order and\nnowhere else: Spring famine (2 draws), each season's assassination rolls (ascending payer index),\nSummer plague (1 draw), Winter rebellion rolls (ascending power index then ascending province code),\nWinter income draws (ascending power index). Every draw is written into the event that consumed it,\nso a spectator can check the dice against the outcome, and the replay re-derives the same stream from\nthe seed and raises if a recorded draw disagrees.\n\n- Famine: 2 of the 36 land provinces per year, uniform without replacement.\n- Assassination: two dice, 1..36 uniform; success iff roll <= ducats paid (6..30). 18 ducats is 50%.\n- Plague: 1 of the 24 cities per year, uniform.\n- Rebellion: a d6 per empty non-home owned city per Winter; the city is lost on a 1 (1 in 6).\n- Income draw: 0..3 ducats per power per Winter, uniform.\n\n## Money, with every cost\n\n- Starting treasury: 12 ducats. City income: 3 ducats per owned city per Winter. Unit upkeep: 1 ducat\n  per unit per Winter. New unit: 3 ducats.\n- Gift: any amount, arrives instantly, cannot be reversed.\n- Bribe to disband: 9 ducats + the target's defence. Bribe to buy: 15 + defence.\n- Defend: any amount; every ducat raises what a briber must beat.\n- Assassinate: 6..30 ducats for a roll of two dice.\n\n## Scoring, and its sign\n\nLet c be the cities a power owns when the episode ends and d its ducats.\n\n- CONQUEST: if any power owns 12 or more cities at a step-10 ownership update, or is the only power\n  still owning a city, it scores 1.0, every other seat scores 0.0, and the episode ends there.\n- OTHERWISE: score = (c + min(d, 24) / 24) / 24.\n\nHigher is better and every score is in [0, 1]. The denominator is the constant 24, so an unclaimed\nneutral dilutes everybody equally and taking a city is worth the same to every power. The treasury\nterm is worth at most one city, which is city-share-plus-treasury without letting a miser out-score a\nconqueror. The league ranks by mean episode score.\n\n## The three end reasons\n\n- `conquest` - a power reached 12 cities, or is the last power owning any city. `conqueror` names it.\n- `complete` - the configured years were played out through the final Winter.\n- `deadline` - the episode clock stopped play between batches. Scores use the board as it stands. A\n  deadline result is a legitimate, scoreable episode: the platform keeps nothing from an episode that\n  overruns, so a short honest episode always beats a long one that never lands.\n\nA four-year episode is usually decided on city share plus treasury rather than by a 12-city conquest.\nThat is deliberate.\n"
+          }
+        },
+        {
+          "id": "map.md",
+          "title": "map.md",
+          "content": {
+            "type": "text",
+            "value": "# The Cogiavelli board - Italy, 1499\n\n42 areas: 36 land provinces (24 of them cities) and 6 seas. There are NO SPLIT COASTS anywhere: every\nprovince that touches two seas touches two ADJACENT seas, so `SPA/NC`-style coast notation does not\nexist and never has to be disambiguated.\n\n## The land\n\n| code | name | kind | city | land neighbours | seas |\n|---|---|---|---|---|---|\n| TUR | Turin | inland | neutral | SAV PAV GEN MIL | - |\n| SAV | Savoy | inland | | TUR GEN PAV | - |\n| COM | Como | inland | MILAN | MIL TRE | - |\n| MIL | Milan | inland | MILAN | TUR COM PAV MAN | - |\n| PAV | Pavia | inland | MILAN | TUR SAV MIL GEN MAN MOD | - |\n| GEN | Genoa | coastal | neutral | TUR SAV PAV MOD PIS | LIG |\n| TRE | Trent | inland | | COM VER MAN | - |\n| MAN | Mantua | inland | | MIL PAV TRE VER MOD FER | - |\n| VER | Verona | inland | VENICE | TRE MAN PAD FER | - |\n| PAD | Padua | inland | VENICE | VER VEN FER FRI | - |\n| VEN | Venice | coastal | VENICE | PAD FRI FER | UAD |\n| FRI | Friuli | coastal | | PAD VEN TRI | UAD |\n| TRI | Trieste | coastal | neutral | FRI BOS | UAD |\n| FER | Ferrara | coastal | neutral | MAN VER PAD VEN BOL RMG | UAD |\n| MOD | Modena | inland | | GEN PAV MAN BOL PIS | - |\n| BOL | Bologna | inland | neutral | FER MOD RMG FLO | - |\n| RMG | Romagna | coastal | | FER BOL FLO URB | UAD |\n| PIS | Pisa | coastal | FLORENCE | GEN MOD FLO SIE | LIG UTS |\n| FLO | Florence | inland | FLORENCE | BOL RMG PIS SIE URB | - |\n| SIE | Siena | inland | FLORENCE | PIS FLO PER ROM | - |\n| URB | Urbino | inland | | RMG FLO PER ANC | - |\n| ANC | Ancona | coastal | PAPACY | URB PER ABR | LAD |\n| PER | Perugia | inland | PAPACY | SIE URB ANC ROM ABR | - |\n| ROM | Rome | coastal | PAPACY | SIE PER ABR NAP | UTS LTS |\n| ABR | Abruzzi | coastal | | ANC PER ROM NAP APU | LAD |\n| NAP | Naples | coastal | NAPLES | ROM ABR APU CAL | LTS |\n| APU | Apulia | coastal | | ABR NAP BAR CAL | LAD |\n| BAR | Bari | coastal | NAPLES | APU CAL | LAD |\n| CAL | Calabria | coastal | | NAP APU BAR | LTS ION |\n| MES | Messina | coastal | neutral | PAL | LTS ION |\n| PAL | Palermo | coastal | NAPLES | MES | LTS |\n| BOS | Bosnia | inland | | TRI RAG ALB | - |\n| RAG | Ragusa | coastal | TURK | BOS ALB | LAD |\n| ALB | Albania | inland | | BOS RAG DUR AVL | - |\n| DUR | Durazzo | coastal | TURK | ALB AVL | LAD |\n| AVL | Avlona | coastal | TURK | ALB DUR | LAD ION |\n\n## The seas\n\nLIG Ligurian Sea (touches UTS) - UTS Upper Tyrrhenian Sea (LIG, LTS) - LTS Lower Tyrrhenian Sea\n(UTS, ION) - ION Ionian Sea (LTS, LAD) - LAD Lower Adriatic Sea (ION, UAD) - UAD Upper Adriatic Sea\n(LAD). A sea is adjacent to exactly the coastal provinces that list it in the table above.\n\n## The 24 cities\n\nHome cities (18): VEN PAD VER (Venice) - MIL PAV COM (Milan) - FLO PIS SIE (Florence) -\nROM ANC PER (Papacy) - NAP BAR PAL (Naples) - RAG DUR AVL (Turk).\nNeutral at start (6): TUR GEN TRI FER BOL MES.\n\n## The two movement graphs\n\n- ARMIES move on the land-neighbour column, land provinces only. An army never enters a sea and is\n  never adjacent to one.\n- FLEETS move on: sea-to-sea edges; sea to each of its coastal provinces; COAST-HOPS, meaning two\n  coastal provinces that are land-adjacent AND share at least one sea (GEN-PIS on the Ligurian,\n  DUR-AVL on the Lower Adriatic; BAR-CAL is NOT a coast-hop, because they share no sea); and exactly\n  one fleet-only edge, CAL-MES, THE STRAIT OF MESSINA. A fleet never enters an inland province.\n- AN ARMY REACHES SICILY (MES, PAL) ONLY BY CONVOY. Sicily is the only part of the land graph that is\n  not connected to the mainland by land.\n\n## The 18 starting units\n\nVenice A VER, A PAD, F VEN - Milan A MIL, A PAV, A COM - Florence A FLO, A SIE, F PIS -\nPapacy A ROM, A PER, F ANC - Naples A NAP, A BAR, F PAL - Turk A DUR, A AVL, F RAG.\nEvery power starts with 12 ducats.\n\n## Order notation\n\nOne grammar, whitespace- and case-tolerant; `-`, `-` and `->` all read as a move, and\nS/SUPPORT, C/CONVOY, H/HOLD/HOLDS are all accepted.\n\n    A VER H                  the army in Verona holds\n    A VER - MAN              the army in Verona moves to Mantua\n    A BAR - PAL VIA CONVOY   the army in Bari is carried to Palermo by sea\n    F VEN S A PAD - FER      the fleet in Venice supports Padua's move to Ferrara\n    F VEN S A PAD            the fleet in Venice supports Padua's hold\n    F LAD C A BAR - RAG      the fleet in the Lower Adriatic convoys Bari to Ragusa\n\nWorked examples:\n\n    A URB - ANC  +  A PER S A URB - ANC   beats  F ANC H         Ancona is taken, the fleet retreats\n    A VER - MAN  +  A MOD - MAN                                   both bounce, STANDOFF in Mantua\n    A MAN - VER  cuts  A VER S A PAD - FER                        so the attack on Ferrara fails\n    A BAR - AVL VIA CONVOY  +  F LAD C A BAR - AVL                the army crosses the Adriatic\n\nEach seat is handed the COMPLETE list of legal orders for each of its own units, in exactly this\nnotation, in its orders prompt; an order that is not on that list becomes a hold.\n"
+          }
+        }
+      ]
+    }
+  },
+  "player": [
+    {
+      "id": "cogiavelli-player",
+      "name": "Cogiavelli Prompt Player",
+      "type": "player",
+      "description": "The reference Cogiavelli policy: delivers its PLAYER_PROMPT (or a default strategy) to the game and spectates until the final frame. Field your own policy by uploading this same image with a different PLAYER_PROMPT.",
+      "image": "{{COGIAVELLI_IMAGE}}",
+      "run": [
+        "/bin/cogiavelli-player"
+      ],
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-cogiavelli/tree/main"
+    },
+    {
+      "id": "cogiavelli-condottiere",
+      "name": "Cogiavelli Condottiere Baseline",
+      "type": "player",
+      "description": "The scripted expander as a fieldable policy: registers its seat as rule-based, so the server plays it deterministically with no LLM. It walks its units toward the nearest city it does not own, never stands itself off, disbands a threatening neighbour for nine ducats when it can afford to, and builds in Winter while upkeep stays covered.",
+      "image": "{{COGIAVELLI_IMAGE}}",
+      "run": [
+        "/bin/cogiavelli-player"
+      ],
+      "env": {
+        "PLAYER_SCRIPTED": "condottiere"
+      },
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-cogiavelli/tree/main"
+    },
+    {
+      "id": "cogiavelli-banker",
+      "name": "Cogiavelli Banker Baseline",
+      "type": "player",
+      "description": "The scripted hoarder as a fieldable policy: every unit holds or supports a neighbour's hold, four ducats of loyalty go onto each garrison while the vault is deep, and it builds only when very rich. It never attacks, never bribes and never assassinates - the wall that cannot be talked into anything.",
+      "image": "{{COGIAVELLI_IMAGE}}",
+      "run": [
+        "/bin/cogiavelli-player"
+      ],
+      "env": {
+        "PLAYER_SCRIPTED": "banker"
+      },
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-cogiavelli/tree/main"
+    }
+  ],
+  "variants": [
+    {
+      "id": "standard",
+      "name": "Standard game",
+      "description": "Six powers, three seasons a year, four years, letters and ledgers.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player1"
+          },
+          {
+            "name": "Player2"
+          },
+          {
+            "name": "Player3"
+          },
+          {
+            "name": "Player4"
+          },
+          {
+            "name": "Player5"
+          },
+          {
+            "name": "Player6"
+          }
+        ],
+        "num_agents": 6,
+        "years": 4,
+        "press": true,
+        "turnDelayMs": 300,
+        "player_connect_timeout_seconds": 180
+      }
+    },
+    {
+      "id": "gunboat",
+      "name": "Gunboat (no letters)",
+      "description": "No press: only ducats and orders speak. Six years in the same budget.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player1"
+          },
+          {
+            "name": "Player2"
+          },
+          {
+            "name": "Player3"
+          },
+          {
+            "name": "Player4"
+          },
+          {
+            "name": "Player5"
+          },
+          {
+            "name": "Player6"
+          }
+        ],
+        "num_agents": 6,
+        "years": 6,
+        "press": false,
+        "turnDelayMs": 300,
+        "player_connect_timeout_seconds": 180
+      }
+    }
+  ],
+  "certification": {
+    "game_config": {
+      "players": [
+        {
+          "name": "Sprocket"
+        },
+        {
+          "name": "Gizmo"
+        },
+        {
+          "name": "Ratchet"
+        },
+        {
+          "name": "Widget"
+        },
+        {
+          "name": "Bolt"
+        },
+        {
+          "name": "Piston"
+        }
+      ],
+      "num_agents": 6,
+      "seed": 7,
+      "years": 1,
+      "press": true,
+      "turnDelayMs": 0,
+      "player_connect_timeout_seconds": 180
+    },
+    "players": [
+      {
+        "player_id": "cogiavelli-player"
+      },
+      {
+        "player_id": "cogiavelli-condottiere"
+      },
+      {
+        "player_id": "cogiavelli-player"
+      },
+      {
+        "player_id": "cogiavelli-banker"
+      },
+      {
+        "player_id": "cogiavelli-condottiere"
+      },
+      {
+        "player_id": "cogiavelli-player"
+      }
+    ]
+  }
+}
