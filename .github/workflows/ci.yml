@@ -149,6 +149,14 @@ jobs:
           done
           exit "${fail}"
 
+      - name: Sweep the scripted baselines' parameter grid
+        # Acceptance checklist item 7: "the baseline's parameters were tuned
+        # with a grid harness, not guessed". tools/tune_baseline.nim sweeps
+        # the condottiere's and the banker's tunable constants over seeded
+        # self-play and prints the whole grid; docs/tuning.md records the run
+        # this repo shipped from.
+        run: nim r --hints:off -d:release --path:src tools/tune_baseline.nim
+
   # ---------------------------------------------------------------------
   # Packaging smoke: the production image builds, and one real episode runs
   # end to end in raw docker with the certification fixture's seat mix.

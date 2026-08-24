@@ -49,6 +49,19 @@ type
     notes*: string
     scripted*: bool     ## decided by a baseline, not by the model
 
+  BaselineParams* = object
+    ## The scripted baselines' tunable constants, in one place so
+    ## `tools/tune_baseline.nim` can sweep them. The shipped values are the
+    ## grid's fitted point; `docs/tuning.md` records the sweep that chose
+    ## them.
+    bribeTreasury*: int        ## condottiere: disband a threat from here up
+    buyTreasury*: int          ## condottiere: buy a city-sitter from here up
+    vacatePenalty*: int        ## condottiere: rank cost of leaving own city
+    autumnVacatePenalty*: int  ## ... and the same in Autumn
+    defendTreasury*: int       ## banker: keep defending while this rich
+    defendAmount*: int         ## banker: ducats per defend entry
+    buildTreasury*: int        ## banker: build only from here up
+
   LlmTransport = enum
     ltNone, ltBedrock, ltAnthropic
 
@@ -64,6 +77,16 @@ type
     maxOutputTokens: int
     timeoutSeconds: int
     disabled*: bool
+
+const ShippedBaseline* = BaselineParams(
+  bribeTreasury: 12,
+  buyTreasury: 20,
+  vacatePenalty: 1,
+  autumnVacatePenalty: 2,
+  defendTreasury: 15,
+  defendAmount: 4,
+  buildTreasury: 30
+)
 
 proc parseScriptKind*(text: string): ScriptKind =
   ## PLAYER_SCRIPTED values: "1"/"true"/"yes"/"condottiere" play the
@@ -184,7 +207,8 @@ proc distanceMap(sim: Sim, targets: seq[int], fleet: bool):
 proc cityOccupied(sim: Sim, city: int): bool =
   sim.board.hasUnit(city)
 
-proc condottiereOrders*(sim: Sim, power: int): seq[string] =
+proc condottiereOrders*(sim: Sim, power: int,
+    params = ShippedBaseline): seq[string] =
   ## Rank each unit's legal moves: (a) an unowned neutral city, (b) an
   ## unoccupied city owned by another power, (c) a move that strictly
   ## reduces the distance to the nearest city this power does not own,
@@ -203,7 +227,8 @@ proc condottiereOrders*(sim: Sim, power: int): seq[string] =
   let seaMap = distanceMap(sim, targets, true)
   var claimed: array[NumAreas, bool]
   var plans: seq[Plan]
-  let vacatePenalty = if sim.season == seAutumn: 2 else: 1
+  let vacatePenalty = if sim.season == seAutumn: params.autumnVacatePenalty
+                      else: params.vacatePenalty
   for unit in sim.myUnits(power):
     let fleet = unit.kind == ukFleet
     let hops = if fleet: seaMap else: landMap
@@ -288,7 +313,8 @@ proc condottiereOrders*(sim: Sim, power: int): seq[string] =
     else:
       result.add(head & " H")
 
-proc condottiereSpend(sim: Sim, power: int): seq[SpendEntry] =
+proc condottiereSpend(sim: Sim, power: int,
+    params = ShippedBaseline): seq[SpendEntry] =
   ## Buy the war, not the peace: disband a neighbour that threatens an
   ## owned city, or buy the nearest enemy unit sitting on a city.
   let treasury = sim.treasury[power]
@@ -296,7 +322,7 @@ proc condottiereSpend(sim: Sim, power: int): seq[SpendEntry] =
   for slot, city in Cities:
     if sim.owner[slot] == power:
       mine.add(city)
-  if treasury >= 12:
+  if treasury >= params.bribeTreasury:
     var threats: seq[int]
     for unit in sim.board.units:
       if unit.power == power:
@@ -318,7 +344,7 @@ proc condottiereSpend(sim: Sim, power: int): seq[SpendEntry] =
         targetPower: sim.board.unitAt(target).power, targetProvince: target,
         targetUnit: unitText(sim.board.unitAt(target)),
         amount: BribeDisbandCost)]
-  if treasury >= 20:
+  if treasury >= params.buyTreasury:
     var candidates: seq[int]
     for unit in sim.board.units:
       if unit.power == power:
@@ -385,7 +411,8 @@ proc bankerOrders(sim: Sim, power: int): seq[string] =
     else:
       result.add(head & " H")
 
-proc bankerSpend(sim: Sim, power: int): seq[SpendEntry] =
+proc bankerSpend(sim: Sim, power: int,
+    params = ShippedBaseline): seq[SpendEntry] =
   var treasury = sim.treasury[power]
   var garrisons: seq[int]
   for unit in sim.board.units:
@@ -393,15 +420,16 @@ proc bankerSpend(sim: Sim, power: int): seq[SpendEntry] =
       garrisons.add(unit.province)
   garrisons.sortByCode()
   for province in garrisons:
-    if result.len >= MaxSpendEntries or treasury < 15:
+    if result.len >= MaxSpendEntries or treasury < params.defendTreasury:
       break
     result.add(SpendEntry(power: power, kind: spDefend, targetPower: power,
       targetProvince: province, targetUnit: unitText(sim.board.unitAt(province)),
-      amount: 4))
-    treasury -= 4
+      amount: params.defendAmount))
+    treasury -= params.defendAmount
 
-proc bankerBuilds(sim: Sim, power: int): seq[string] =
-  if sim.treasury[power] < 30:
+proc bankerBuilds(sim: Sim, power: int,
+    params = ShippedBaseline): seq[string] =
+  if sim.treasury[power] < params.buildTreasury:
     return
   var vacant: seq[int]
   for slot, city in Cities:
@@ -412,7 +440,7 @@ proc bankerBuilds(sim: Sim, power: int): seq[string] =
     result.add("A " & Provinces[vacant[0]].code)
 
 proc scriptedAction*(sim: Sim, seat: int, kind: ScriptKind,
-    phase: PhaseKind): Decision =
+    phase: PhaseKind, params = ShippedBaseline): Decision =
   ## Both baselines are deterministic, silent, and legal by construction.
   result.scripted = true
   if phase == phPress:
@@ -421,12 +449,12 @@ proc scriptedAction*(sim: Sim, seat: int, kind: ScriptKind,
   case kind
   of skBanker:
     result.orders = bankerOrders(sim, power)
-    result.spend = bankerSpend(sim, power)
+    result.spend = bankerSpend(sim, power, params)
     if sim.season == seAutumn:
-      result.builds = bankerBuilds(sim, power)
+      result.builds = bankerBuilds(sim, power, params)
   else:
-    result.orders = condottiereOrders(sim, power)
-    result.spend = condottiereSpend(sim, power)
+    result.orders = condottiereOrders(sim, power, params)
+    result.spend = condottiereSpend(sim, power, params)
     if sim.season == seAutumn:
       result.builds = condottiereBuilds(sim, power)
 
