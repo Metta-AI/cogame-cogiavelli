@@ -578,14 +578,16 @@ proc legalOrderText(sim: Sim, power: int): string =
   lines.join("\n")
 
 proc bribeMenuText(sim: Sim, power: int): string =
+  ## The price list, exactly as the validator applies it. The defender's
+  ## own `defend` entries ride in the SAME simultaneous batch, so what they
+  ## add to these prices is unknowable at prompt time — the menu quotes the
+  ## floor and the prompt says a defended unit costs more.
   var lines: seq[string]
   for unit in sim.board.units:
     if unit.power == power:
       continue
-    var defence = 0
     lines.add("  " & unitText(unit) & " (" & PowerNames[unit.power] &
-      ") — disband " & $(BribeDisbandCost + defence) & ", buy " &
-      $(BribeBuyCost + defence))
+      ") \u2014 disband " & $BribeDisbandCost & ", buy " & $BribeBuyCost)
   if lines.len == 0:
     return "  (there is nothing to buy)"
   lines.sort(system.cmp)
