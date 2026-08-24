@@ -471,29 +471,36 @@ proc treasuryText(sim: Sim): string =
   parts.join(" \u00b7 ")
 
 proc ledgerText(sim: Sim): string =
-  ## The resolved ledger of the last two years.
+  ## The resolved ledger of the last two years — 2 x SeasonsPerYear resolved
+  ## seasons, the same window `historyText` shows orders for. `sim.ledger`
+  ## is the whole-episode record the endcard draws; the prompt gets the
+  ## window the note promises.
   var lines: seq[string]
-  let cutoff = sim.year - 1
-  for entry in sim.ledger:
-    if not entry.applied:
-      continue
-    let payer = PowerNames[entry.power]
-    case entry.kind
-    of spGift:
-      lines.add(payer & " gave " & PowerNames[entry.targetPower] & " " &
-        $entry.amount & " ducats")
-    of spBribeDisband, spBribeBuy:
-      lines.add(payer & " paid " & $entry.amount & " against " &
-        entry.targetUnit & " (" & PowerNames[entry.targetPower] & ")")
-    of spDefend:
-      lines.add(payer & " paid " & $entry.amount & " to keep " &
-        entry.targetUnit & " loyal")
-    of spAssassinate:
-      lines.add(payer & " paid " & $entry.amount & " for a dagger against " &
-        PowerNames[entry.targetPower])
-  discard cutoff
+  var start = 0
+  if sim.history.len > 2 * SeasonsPerYear:
+    start = sim.history.len - 2 * SeasonsPerYear
+  for index in start ..< sim.history.len:
+    for power in 0 ..< Powers:
+      for entry in sim.history[index].spends[power]:
+        if not entry.applied:
+          continue
+        let payer = PowerNames[entry.power]
+        case entry.kind
+        of spGift:
+          lines.add(payer & " gave " & PowerNames[entry.targetPower] & " " &
+            $entry.amount & " ducats")
+        of spBribeDisband, spBribeBuy:
+          lines.add(payer & " paid " & $entry.amount & " against " &
+            entry.targetUnit & " (" & PowerNames[entry.targetPower] & ")")
+        of spDefend:
+          lines.add(payer & " paid " & $entry.amount & " to keep " &
+            entry.targetUnit & " loyal")
+        of spAssassinate:
+          lines.add(payer & " paid " & $entry.amount & " for a dagger against " &
+            PowerNames[entry.targetPower])
   if lines.len == 0:
     return "(nothing has been paid yet)"
+  ## A two-year window is bounded but not small; keep the prompt bounded too.
   if lines.len > 40:
     lines = lines[lines.len - 40 .. ^1]
   lines.join("\n")
