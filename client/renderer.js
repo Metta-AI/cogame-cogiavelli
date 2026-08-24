@@ -2021,6 +2021,12 @@
     if (event.outcome === "bought") return head + " It changes sides.";
     if (event.outcome === "disbanded") return head + " It disbands.";
     if (event.outcome === "defended") {
+      // "defended" is the vocabulary's only place for a bribe that did not
+      // meet the price, so say which it was: nobody paid to defend this
+      // unit, the offer was simply short.
+      if (!event.defence) {
+        return head + " That is under the price and the bribe fails.";
+      }
       return head + " " + powerLong(event.targetPower) + " had paid " +
         event.defence + " to keep it loyal, and the bribe fails.";
     }
