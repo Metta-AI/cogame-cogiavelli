@@ -33,38 +33,40 @@ still records them. `.github/workflows/ci.yml` runs the harness itself with `--c
 
 ## condottiere — 4 seeds × 3 years, gunboat
 
-Swept: the treasury gate for `bribe_disband` (`BribeGrid = [8, 12, 16]`), the gate for
-`bribe_buy` (`BuyGrid = [16, 20, 24]`), and the rank penalty for vacating an owned city
+Swept: the treasury gate for `bribe_disband` (`BribeGrid = [9, 12, 16]`), the gate for
+`bribe_buy` (`BuyGrid = [15, 20, 24]`), and the rank penalty for vacating an owned city
 (`VacateGrid = [1, 2]`, Autumn always one higher).
 
 | configuration | mean score |
 |---|---|
-| bribe>=8 buy>=16 vacate=1/2 **(shipped)** | 0.1836 |
-| bribe>=8 buy>=20 vacate=1/2 | 0.1808 |
+| bribe>=9 buy>=15 vacate=1/2 **(shipped)** | 0.1816 |
+| bribe>=9 buy>=20 vacate=1/2 | 0.1808 |
 | bribe>=12 buy>=20 vacate=1/2 | 0.1806 |
-| bribe>=12 buy>=16 vacate=1/2 | 0.1788 |
-| bribe>=8 buy>=24 vacate=1/2 | 0.1782 |
+| bribe>=12 buy>=15 vacate=1/2 | 0.1788 |
+| bribe>=9 buy>=24 vacate=1/2 | 0.1782 |
 | bribe>=12 buy>=24 vacate=1/2 | 0.1780 |
-| bribe>=16 buy>=16 vacate=1/2 | 0.1664 |
 | bribe>=16 buy>=20 vacate=1/2 | 0.1638 |
 | bribe>=16 buy>=24 vacate=1/2 | 0.1628 |
-| bribe>=8 buy>=16 vacate=2/3 | 0.1576 |
-| bribe>=16 buy>=16 vacate=2/3 | 0.1554 |
-| bribe>=8 buy>=20 vacate=2/3 | 0.1547 |
+| bribe>=16 buy>=15 vacate=1/2 | 0.1610 |
+| bribe>=9 buy>=15 vacate=2/3 | 0.1556 |
+| bribe>=9 buy>=20 vacate=2/3 | 0.1547 |
 | bribe>=12 buy>=20 vacate=2/3 | 0.1532 |
 | bribe>=16 buy>=20 vacate=2/3 | 0.1528 |
-| bribe>=8 buy>=24 vacate=2/3 | 0.1521 |
+| bribe>=16 buy>=15 vacate=2/3 | 0.1526 |
+| bribe>=9 buy>=24 vacate=2/3 | 0.1521 |
 | bribe>=16 buy>=24 vacate=2/3 | 0.1517 |
-| bribe>=12 buy>=16 vacate=2/3 | 0.1515 |
+| bribe>=12 buy>=15 vacate=2/3 | 0.1515 |
 | bribe>=12 buy>=24 vacate=2/3 | 0.1506 |
 
-**Fitted: `bribeTreasury = 8`, `buyTreasury = 16`, `vacatePenalty = 1` (2 in Autumn).**
+**Fitted: `bribeTreasury = 9`, `buyTreasury = 15`, `vacatePenalty = 1` (2 in Autumn).**
 
 Reading: the vacate penalty is the parameter that matters — every `vacate=1/2` row beats every
 `vacate=2/3` row, because a penalty of two in Autumn pins units inside cities they already own
 and stops the expansion the baseline exists for. Within that, the money gates want to be as low
-as the price allows: `bribe>=8` and `buy>=16` mean "buy the disband/the unit the season you can
-afford it" (9 and 15 ducats), and waiting costs a season of the board.
+as the price allows: `bribe>=9` and `buy>=15` mean "buy the disband, or buy the unit, the season
+you can afford it" — the gates sit exactly on the prices — and waiting costs a season of board.
+A gate below the price is the same baseline, because `condottiereSpend` never writes an entry it
+cannot pay for (`src/cogiavelli/llm.nim:335,357`), which is why the grid starts at 9 and 15.
 
 ## banker — 4 seeds × 3 years, gunboat
 
@@ -90,17 +92,23 @@ first is dead money against anything that bids the list price — `pay=2` is un-
 same opponents `pay=6` is, and keeps the difference, which the score counts. Defending down to a
 floor of 10 rather than 15 covers more garrisons in the seasons that decide the episode.
 
+## The run this table came from
+
+CI run **32731425708**, job `test`, step "Sweep the scripted baselines' parameter grid", at
+`nim 2.2.4 -d:release`. `--check` in that step compares the shipped point against the grid on
+every push, so this record is re-verified rather than trusted.
+
 ## What this changed
 
 | constant | design note | fitted |
 |---|---|---|
-| condottiere `bribe_disband` gate | treasury ≥ 12 | treasury ≥ 8 |
-| condottiere `bribe_buy` gate | treasury ≥ 20 | treasury ≥ 16 |
+| condottiere `bribe_disband` gate | treasury ≥ 12 | treasury ≥ 9 |
+| condottiere `bribe_buy` gate | treasury ≥ 20 | treasury ≥ 15 |
 | condottiere vacate penalty | 1, 2 in Autumn | unchanged |
 | banker `defend` floor | treasury ≥ 15 | treasury ≥ 10 |
 | banker `defend` amount | 4 ducats | 2 ducats |
 | banker build floor | treasury ≥ 30 | unchanged |
 
 The prose the design note writes about both baselines — what they do, in what order, and why —
-is unchanged; only these five numbers moved, and they moved because the grid said so.
+is unchanged; only these four numbers moved, and they moved because the grid said so.
 `docs/plans/2026-08-24-cogiavelli-design.md` still records the figures the sweep started from.

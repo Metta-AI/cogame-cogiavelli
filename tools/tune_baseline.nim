@@ -22,8 +22,11 @@ import
 const
   ## The grid. Small on purpose: it runs inside the test job, and a
   ## baseline with a knife-edge optimum would be a bad baseline anyway.
-  BribeGrid* = [8, 12, 16]
-  BuyGrid* = [16, 20, 24]
+  ## The two money gates start at the prices themselves (9 and 15): a gate
+  ## below the price is the same baseline, since an entry it cannot pay for
+  ## is never written.
+  BribeGrid* = [9, 12, 16]
+  BuyGrid* = [15, 20, 24]
   VacateGrid* = [1, 2]
   DefendTreasuryGrid* = [10, 15, 20]
   DefendAmountGrid* = [2, 4, 6]

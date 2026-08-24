@@ -83,10 +83,11 @@ type
 ## `tests/test_tuning.nim` on every CI run. The design note's pre-tuning
 ## figures were 12 / 20 for the condottiere's two treasury gates and 15 / 4
 ## for the banker's defence; the sweep moved the first pair down to "bribe as
-## soon as you can afford it" and the second to "defend everything, cheaply".
+## soon as you can afford it" (the prices themselves, 9 and 15) and the second
+## to "defend everything, cheaply".
 const ShippedBaseline* = BaselineParams(
-  bribeTreasury: 8,
-  buyTreasury: 16,
+  bribeTreasury: 9,
+  buyTreasury: 15,
   vacatePenalty: 1,
   autumnVacatePenalty: 2,
   defendTreasury: 10,
@@ -328,7 +329,10 @@ proc condottiereSpend(sim: Sim, power: int,
   for slot, city in Cities:
     if sim.owner[slot] == power:
       mine.add(city)
-  if treasury >= params.bribeTreasury:
+  ## Affordable BY CONSTRUCTION: a gate below the price could otherwise make
+  ## the baseline write an entry it cannot pay, and the baseline's whole
+  ## contract is that every entry is legal and affordable when written.
+  if treasury >= max(params.bribeTreasury, BribeDisbandCost):
     var threats: seq[int]
     for unit in sim.board.units:
       if unit.power == power:
@@ -350,7 +354,7 @@ proc condottiereSpend(sim: Sim, power: int,
         targetPower: sim.board.unitAt(target).power, targetProvince: target,
         targetUnit: unitText(sim.board.unitAt(target)),
         amount: BribeDisbandCost)]
-  if treasury >= params.buyTreasury:
+  if treasury >= max(params.buyTreasury, BribeBuyCost):
     var candidates: seq[int]
     for unit in sim.board.units:
       if unit.power == power:
@@ -426,7 +430,8 @@ proc bankerSpend(sim: Sim, power: int,
       garrisons.add(unit.province)
   garrisons.sortByCode()
   for province in garrisons:
-    if result.len >= MaxSpendEntries or treasury < params.defendTreasury:
+    if result.len >= MaxSpendEntries or
+        treasury < max(params.defendTreasury, params.defendAmount):
       break
     result.add(SpendEntry(power: power, kind: spDefend, targetPower: power,
       targetProvince: province, targetUnit: unitText(sim.board.unitAt(province)),
