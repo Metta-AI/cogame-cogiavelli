@@ -621,11 +621,11 @@ Rules:
   Winter; every unit costs 1 ducat of upkeep; a new unit costs 3 ducats and appears in a
   vacant city you own.
 - DUCATS ARE THE OTHER ARMY. In the same submission as your orders you may: GIFT ducats
-  to another power (they arrive, always - this is the only promise in the game that
+  to another power (they arrive, always — this is the only promise in the game that
   cannot be broken); BRIBE an enemy unit to disband (9 ducats) or to change sides and
   serve you (15 ducats); DEFEND one of your own units against bribery (every ducat you
   pay raises what a briber must beat); or ASSASSINATE a rival, paying 6 to 30 ducats for
-  a roll of two dice - beat the roll and that power's whole court freezes: every one of
+  a roll of two dice — beat the roll and that power's whole court freezes: every one of
   its units holds this season and it sends no letters the next. Money resolves BEFORE the
   armies move, and it is spent whether or not it works. Everything you pay is published.
 - Italy bites back: famine marks two provinces each Spring and starves whatever still
@@ -636,7 +636,7 @@ Rules:
 - LETTERS ARE NOT BINDING. You may promise anything to anyone and then do the opposite.
   So may they. Only ducats that have actually changed hands are real.
 
-OUTPUT FORMAT: reply with ONLY one JSON object, nothing else - no analysis, no
+OUTPUT FORMAT: reply with ONLY one JSON object, nothing else — no analysis, no
 explanation, no markdown fences, no text before or after the object. Your reply must
 begin with the character { and end with }."""
 
