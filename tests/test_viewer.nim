@@ -202,4 +202,20 @@ block mapAsset:
     check(Provinces[index].code in codes,
       "the drawn map covers " & Provinces[index].code)
 
+block endcardColumnsAndLedger:
+  ## design.md:1052-1056 — rows ranked by score with columns power, cities,
+  ## ducats, spent, STABS, score, and a ledger animating one year per
+  ## second in a loop.
+  let renderer = readFile(repoDir() / "client" / "renderer.js")
+  check(">stabs<" in renderer, "the endcard header carries the stabs column")
+  check("function stabCounts" in renderer,
+    "and the count comes from the recorded stabs")
+  check("function animateEndcard" in renderer and "1000)" in renderer,
+    "the ledger walks a year a second")
+  let css = readFile(repoDir() / "client" / "chrome.css")
+  check(".end-rows { grid-template-columns: auto 1fr auto auto auto auto auto; }"
+    in css, "the endcard grid has all seven columns")
+  check(".end-ledger-year.on { display: grid; }" in css,
+    "one ledger year is visible at a time")
+
 echo "test_viewer: ok"

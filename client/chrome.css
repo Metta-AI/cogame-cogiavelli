@@ -640,7 +640,9 @@ body.feed-collapsed #feed { display: none; }
 #loading { bottom: var(--band); top: 0; }
 
 /* ---------- endcard ledger ---------- */
-.end-rows { grid-template-columns: auto 1fr auto auto auto auto; }
+/* rank, name, cities, ducats, spent, stabs, score */
+.end-rows { grid-template-columns: auto 1fr auto auto auto auto auto; }
+.end-cell.stabs { color: var(--red); }
 .end-ledger { margin-top: 14px; }
 .end-ledger-head {
   font-family: var(--finefont);
@@ -657,6 +659,17 @@ body.feed-collapsed #feed { display: none; }
 }
 .end-cell.ledger { font-size: 12px; color: var(--ghost); }
 .end-cell.ledger.paid { color: var(--amber); }
+/* One year of the ledger at a time; the endcard cycles them, a year a
+   second, so the whole episode's money is watchable in place. */
+.end-ledger-year { display: none; }
+.end-ledger-year.on { display: grid; }
+.end-ledger-when {
+  font-family: var(--finefont);
+  font-size: 8px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
 
 /* ---------- small screens: legible at 360px ---------- */
 @media (max-width: 640px) {

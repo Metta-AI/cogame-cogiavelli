@@ -1021,9 +1021,12 @@
     container.classList.toggle("show", !!show);
     if (!show || !results || container.dataset.built === "yes") return;
     container.dataset.built = "yes";
-    // COGIAVELLI hook: the endcard carries the ledger next to the cities.
+    // COGIAVELLI hook: the endcard carries the ledger next to the cities,
+    // and the ledger walks the episode a year at a time once it is in the
+    // document.
     if (window.CogiavelliChrome && results.powers) {
       container.innerHTML = window.CogiavelliChrome.endcard(results, nameMap);
+      window.CogiavelliChrome.animateEndcard(container);
       return;
     }
     var names = (results.names || []).map(function (name, i) {
@@ -1446,6 +1449,7 @@
   var seatOfPower = [0, 1, 2, 3, 4, 5];
   var beat = null;
   var beatIndex = 0;
+  var ledgerTimer = null;
 
   // ---- small helpers ------------------------------------------------------
 
@@ -2477,11 +2481,13 @@
       html += '<div class="end-reason">episode deadline \u2014 scored on ' +
         'the board as it stood</div>';
     }
+    var stabs = stabCounts();
     html += '<div class="end-rows">' +
       '<span class="end-head"></span><span class="end-head">power</span>' +
       '<span class="end-head">cities</span>' +
       '<span class="end-head">ducats</span>' +
       '<span class="end-head">spent</span>' +
+      '<span class="end-head">stabs</span>' +
       '<span class="end-head">score</span>';
     order.forEach(function (i, rank) {
       var winner = i === top ? " end-row-winner" : "";
@@ -2495,33 +2501,61 @@
         DUCAT + "</span>" +
         '<span class="end-cell' + winner + '">' + (results.spent[i] || 0) +
         DUCAT + "</span>" +
+        '<span class="end-cell stabs' + winner + '">' +
+        (stabs[powerIndexOf(results.powers[i])] || 0) + "</span>" +
         '<span class="end-cell' + winner + '">' +
         (results.scores[i] || 0).toFixed(3) + "</span>";
     });
-    html += "</div>" + ledgerHtml(results, names) + "</div>";
+    html += "</div>" + ledgerHtml() + "</div>";
     return html;
   }
 
-  function ledgerHtml(results, names) {
-    // Who paid what to whom over the episode, from the recorded events.
+  function stabCounts() {
+    // Broken pledges, by power, from the recorded battle events.
+    var counts = [0, 0, 0, 0, 0, 0];
+    ((payloadRef && payloadRef.events) || []).forEach(function (event) {
+      if (event.kind !== "battle") return;
+      (event.stabs || []).forEach(function (stab) {
+        if (typeof stab.power === "number" && stab.power >= 0) {
+          counts[stab.power] += 1;
+        }
+      });
+    });
+    return counts;
+  }
+
+  function ledgerFrames() {
+    // Who paid what to whom, accumulated year by year, so the endcard can
+    // walk the episode a year at a time.
     var events = (payloadRef && payloadRef.events) || [];
-    var matrix = [];
-    for (var a = 0; a < 6; a++) {
-      matrix.push([0, 0, 0, 0, 0, 0]);
+    var running = [];
+    for (var a = 0; a < 6; a++) running.push([0, 0, 0, 0, 0, 0]);
+    var frames = [];
+    var year = null;
+    function snapshot(at) {
+      var copy = running.map(function (row) { return row.slice(); });
+      frames.push({ year: at, matrix: copy });
     }
     events.forEach(function (event) {
       if (event.kind !== "spend") return;
+      if (year !== null && event.year !== year) snapshot(year);
+      year = event.year;
       (event.entries || []).forEach(function (entry) {
         if (!entry.applied) return;
         var to = entry.targetPower;
         if (typeof to !== "number" || to < 0) return;
-        matrix[entry.power][to] += entry.amount;
+        running[entry.power][to] += entry.amount;
       });
     });
-    var html = '<div class="end-ledger"><div class="end-ledger-head">' +
-      "THE LEDGER \u2014 ducats paid, payer by target</div>" +
-      '<div class="end-ledger-grid">';
-    html += '<span class="end-head"></span>';
+    snapshot(year);
+    return frames;
+  }
+
+  function ledgerGridHtml(frame, only) {
+    var html = '<div class="end-ledger-grid end-ledger-year' +
+      (only ? " on" : "") + '">';
+    html += '<span class="end-ledger-when">' +
+      (frame.year ? esc(String(frame.year)) : "") + "</span>";
     for (var t = 0; t < 6; t++) {
       html += '<span class="end-head">' + esc(POWERS[t].slice(0, 3)) +
         "</span>";
@@ -2531,12 +2565,40 @@
         "</span>";
       for (var g = 0; g < 6; g++) {
         html += '<span class="end-cell ledger' +
-          (matrix[f][g] ? " paid" : "") + '">' +
-          (matrix[f][g] || "\u00b7") + "</span>";
+          (frame.matrix[f][g] ? " paid" : "") + '">' +
+          (frame.matrix[f][g] || "\u00b7") + "</span>";
       }
     }
-    html += "</div></div>";
-    return html;
+    return html + "</div>";
+  }
+
+  function ledgerHtml() {
+    var frames = ledgerFrames();
+    var html = '<div class="end-ledger"><div class="end-ledger-head">' +
+      "THE LEDGER \u2014 ducats paid, payer by target, year by year</div>";
+    frames.forEach(function (frame, index) {
+      html += ledgerGridHtml(frame, index === 0);
+    });
+    return html + "</div>";
+  }
+
+  function animateEndcard(container) {
+    // One year per second, in a loop. The endcard is built once per page,
+    // so there is never more than one of these running; the previous one
+    // is cleared before a new one starts.
+    if (ledgerTimer) {
+      clearInterval(ledgerTimer);
+      ledgerTimer = null;
+    }
+    if (!container || !container.querySelectorAll) return;
+    var layers = container.querySelectorAll(".end-ledger-year");
+    if (layers.length < 2) return;
+    var at = 0;
+    ledgerTimer = setInterval(function () {
+      layers[at].classList.remove("on");
+      at = (at + 1) % layers.length;
+      layers[at].classList.add("on");
+    }, 1000);
   }
 
   // ---- playback pacing ----------------------------------------------------
@@ -2584,6 +2646,7 @@
     clockText: clockText,
     scorebug: scorebug,
     endcard: endcard,
+    animateEndcard: animateEndcard,
     buildDucatBar: buildDucatBar,
     markDucatBeat: markDucatBeat,
     stepMs: stepMs,
