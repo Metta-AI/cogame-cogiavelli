@@ -89,6 +89,8 @@ renders `VENICE · daveey` and `results.json` attributes by policy.
 
 ## Building and running
 
+Training from complete native matches is documented in [docs/TRAINING.md](docs/TRAINING.md).
+
 The whole toolchain lives in CI; the repo builds with [nimby](https://github.com/treeform/nimby):
 
 ```bash
