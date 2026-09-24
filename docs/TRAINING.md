@@ -18,6 +18,11 @@ matches yielded 1,146/282 standard and 855/207 gunboat train/validation
 decisions. The teacher alternates the shipped `condottiere` and `banker`
 policies by seat.
 
+All 2,490 examples fit 4,096 tokens with the local WordLevel smoke
+tokenizer. One CPU optimizer step reduced four-example validation loss
+from 1.77859 to 1.77401 for standard and 1.70834 to 1.70291 for gunboat.
+This verifies the post-training path, not improved league play.
+
 From a Metta checkout with the post-training package installed:
 
 ```sh
@@ -46,3 +51,13 @@ From a Metta checkout with the Coworld training stack, pass absolute
 bridge and manifest paths to `recipes.external.coworld.train` for native
 PufferLib, or `recipes.external.coworld_metta_rl.train` for Metta RL.
 Set `players=6` and choose `standard` or `gunboat`.
+
+Both variants completed 512 Metta RL timesteps with the native terminal
+score and each power's public numeric observation.
+
+Native PufferLib completed 4,096 CUDA timesteps per variant on metta1.
+Reloaded checkpoints on held-out seeds 101 and 102 reported mean scores
+0.142795/0.106771 for standard and 0.155903/0.183594 for gunboat.
+Checkpoint SHA-256 values were
+`3425e3d0a31b14a1f50bb14e48b899eb243a49bf2e9b9f9fd6b53208ff5afc3f`
+and `ceb8d3c020fa12750132143736076f3d6f5fc6a98029390fb7aadebb3177fc51`.
