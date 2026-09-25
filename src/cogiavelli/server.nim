@@ -3,23 +3,25 @@
 ## Endpoints:
 ##   GET /healthz                    - liveness
 ##   GET /client/global              - spectator page
-##   GET /client/player              - player page (view-only; policies are prompts)
+##   GET /client/player              - player page
 ##   GET /client/replay              - replay page (replay mode)
 ##   GET /client/renderer.js         - shared stage renderer
 ##   GET /client/chrome.css          - shared chrome
 ##   GET /client/assets/<name>       - sprites, the map and fonts
-##   WS  /player?slot=N&token=T      - player protocol (prompt delivery)
+##   WS  /player?slot=N&token=T      - player observation/action protocol
 ##   WS  /global                     - spectator snapshots
 ##   WS  /replay                     - replay payload (replay mode)
 ##
-## Player protocol (cogiavelli.player.v1), all JSON text frames:
+## Player protocol (cogiavelli.player.v2), all JSON text frames:
 ##   game -> player: {"type":"welcome","slot":N,"power":...,"name":...}
 ##                   {"type":"state",...} after every event, redacted: the
 ##                   whole public board, the public city table, every
 ##                   treasury, this seat's own inbox and units, and nothing
 ##                   of any other power's pending orders or expenditure
 ##                   {"type":"final","scores":[...],...}
-##   player -> game: {"type":"prompt","prompt":"...","scripted":"condottiere"}
+##                   {"type":"turn","id":N,"view":{...},"system":str,
+##                    "user":str,"baselines":{...}}
+##   player -> game: {"type":"decision","id":N,"action":{...}}
 
 import
   std/[json, locks, os, sets, strutils, tables, times],
@@ -31,7 +33,6 @@ import
   sim
 
 const
-  MaxPromptLen = 4000
   ReplayVersion = 1
   ## Share of the platform's episode timeout spent playing. The rest covers
   ## container start, player connects, and writing the artifacts — the part
@@ -45,8 +46,8 @@ type
   GameState = object
     config: GameConfig
     sim: Sim
-    prompts: seq[string]
-    scripted: seq[ScriptKind]
+    replies: Table[int, JsonNode]
+    requestId: int
     playerSockets: Table[int, WebSocket]
     socketSlots: Table[WebSocket, int]
     globalSockets: HashSet[WebSocket]
@@ -132,6 +133,11 @@ proc playerStateJson(gs: GameState, slot: int): JsonNode =
     if letter.public or letter.toPower == power:
       inbox.add(%*{"from": PowerNames[letter.fromPower], "text": letter.text,
         "public": letter.public})
+  var legalOrders = newJArray()
+  for unit in gs.sim.board.units:
+    if unit.power == power:
+      legalOrders.add(%*{"unit": unitText(unit),
+        "choices": gs.sim.board.legalOrders(unit.province)})
   %*{
     "type": "state",
     "slot": slot,
@@ -149,11 +155,16 @@ proc playerStateJson(gs: GameState, slot: int): JsonNode =
     "owners": owners,
     "counts": counts,
     "treasuries": treasuries,
+    "ledger": gs.sim.ledgerText(),
+    "recentOrders": gs.sim.historyText(power),
+    "bribeMenu": gs.sim.bribeMenuText(power),
     "famine": famine,
     "plague": (if gs.sim.plagueCity >= 0:
       Provinces[gs.sim.plagueCity].code else: ""),
     "paralysed": gs.sim.paralysed[power],
     "inbox": inbox,
+    "notes": gs.sim.notes[slot],
+    "legalOrders": legalOrders,
     "eliminated": gs.sim.eliminated[power],
     "started": gs.started,
     "done": gs.sim.done,
@@ -265,6 +276,20 @@ proc phaseLabel(sim: Sim): string =
   seasonName(sim.season) & " " & $sim.year & " " &
     (if sim.phase == phPress: "letters" else: "orders")
 
+proc baselineJson(decision: Decision, phase: PhaseKind): JsonNode =
+  if phase == phPress:
+    return %*{"broadcast": "", "letters": [], "pledges": [], "notes": ""}
+  var spend = newJArray()
+  for entry in decision.spend:
+    let target = if entry.kind in {spGift, spAssassinate}:
+      PowerNames[entry.targetPower]
+    else:
+      entry.targetUnit
+    spend.add(%*{"action": $entry.kind, "target": target,
+      "amount": entry.amount})
+  %*{"orders": decision.orders, "spend": spend,
+    "builds": decision.builds, "notes": ""}
+
 proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
   {.gcsafe.}:
     let config = state.config
@@ -284,8 +309,6 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       echo "cogiavelli: starting with ", state.playerSockets.len, "/",
         config.tokens.len, " players connected"
       state.broadcastLocked()
-
-    let client = newLlmClient(config)
 
     ## The platform kills the episode at its timeout and keeps nothing. The
     ## hosted dispatcher hands the timeout only to its own worker sidecar,
@@ -310,8 +333,6 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       var simCopy: Sim
       var phase: PhaseKind
       var seats: seq[int]
-      var prompts: seq[string]
-      var kinds: seq[ScriptKind]
       withLock stateLock:
         if state.sim.done:
           break
@@ -327,8 +348,6 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
         seats = state.sim.pendingSeats()
         phase = state.sim.phase
         simCopy = state.sim
-        prompts = state.prompts
-        kinds = state.scripted
       if seats.len == 0:
         echo "cogiavelli: no seat is pending in ", $phase, "; settling"
         withLock stateLock:
@@ -336,26 +355,65 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           state.broadcastLocked()
         break
 
-      ## The slow part (one batch for every open seat at once) runs outside
-      ## the lock on a snapshot; only this thread mutates the sim, so the
-      ## snapshot cannot go stale.
-      let decisions = decideAll(client, simCopy, phase, seats, prompts, kinds)
+      ## Every seat observes the same phase before any action is applied.
+      withLock stateLock:
+        state.requestId.inc
+        state.replies.clear()
+        for seat in seats:
+          if state.playerSockets.hasKey(seat):
+            state.playerSockets[seat].send($ %*{
+              "type": "turn", "id": state.requestId,
+              "view": state.playerStateJson(seat),
+              "system": systemPrompt(simCopy, seat),
+              "user": (if phase == phPress:
+                pressPrompt(simCopy, seat, "")
+                else: ordersPrompt(simCopy, seat, "")),
+              "baselines": {
+                "condottiere": baselineJson(scriptedAction(simCopy, seat,
+                  skCondottiere, phase), phase),
+                "banker": baselineJson(scriptedAction(simCopy, seat,
+                  skBanker, phase), phase)
+              }
+            })
+      let turnDeadline = if playDeadline > 0.0:
+        min(epochTime() + config.turnResponseTimeoutSeconds.float,
+          playDeadline)
+      else:
+        epochTime() + config.turnResponseTimeoutSeconds.float
+      while epochTime() < turnDeadline:
+        var complete = false
+        withLock stateLock:
+          complete = true
+          for seat in seats:
+            if not state.replies.hasKey(seat) and
+                state.playerSockets.hasKey(seat):
+              complete = false
+        if complete:
+          break
+        sleep(25)
 
       withLock stateLock:
         echo "cogiavelli: ", phaseLabel(state.sim), " — ", seats.len,
           " seats at ", (epochTime() - gameStart).int, "s"
-        for index, seat in seats:
+        for seat in seats:
           if state.sim.done or not state.sim.pending[seat]:
             continue
-          let decision = decisions[index]
           try:
+            if not state.replies.hasKey(seat):
+              raise newException(CogiavelliError, "player reply missing")
+            let reply = state.replies[seat]
+            let action = reply["action"]
+            let decision = if phase == phPress:
+              parsePress(simCopy, seat, action)
+              else: parseOrdersReply(simCopy, seat, action)
+            let scripted = reply{"scripted"}.getBool()
             if phase == phPress:
               state.sim.applyPress(seat, decision.broadcast, decision.letters,
-                decision.pledges, decision.notes, decision.scripted)
+                decision.pledges, decision.notes, scripted)
             else:
               state.sim.applyOrders(seat, decision.orders, decision.spend,
-                decision.builds, decision.notes, decision.scripted)
-          except CogiavelliError as error:
+                decision.builds, decision.notes, scripted)
+          except CatchableError as error:
             echo "cogiavelli: reply rejected (", error.msg,
               "); using scripted fallback"
             let fallback = scriptedAction(state.sim, seat, skCondottiere,
@@ -441,7 +499,7 @@ proc playerUpgradeHandler(request: Request) {.gcsafe.} =
         state.playerSockets.len, "/", state.config.tokens.len, ")"
       websocket.send($ %*{
         "type": "welcome",
-        "protocol": "cogiavelli.player.v1",
+        "protocol": "cogiavelli.player.v2",
         "slot": slot,
         "power": PowerNames[state.sim.powerOf[slot]],
         "name": state.sim.names[slot],
@@ -487,22 +545,12 @@ proc websocketHandler(
         return
       try:
         let payload = parseJson(message.data)
-        if payload{"type"}.getStr() == "prompt":
-          var prompt = payload{"prompt"}.getStr()
-          if prompt.len > MaxPromptLen:
-            prompt = cleanText(prompt, MaxPromptLen)
-          let node = payload{"scripted"}
-          let kind =
-            if node.isNil: skNone
-            elif node.kind == JBool:
-              (if node.getBool(): skCondottiere else: skNone)
-            else: parseScriptKind(node.getStr())
+        if payload["type"].getStr() == "decision":
           withLock stateLock:
-            state.prompts[slot] = prompt
-            state.scripted[slot] = kind
-          echo "cogiavelli: slot ", slot, " delivered a prompt (",
-            prompt.len, " chars",
-            (if kind != skNone: ", scripted " & $kind else: ""), ")"
+            if state.started and not state.finished and
+                payload["id"].getInt() == state.requestId and
+                not state.replies.hasKey(slot):
+              state.replies[slot] = payload
       except CatchableError as error:
         echo "cogiavelli: ignoring bad player frame: ", error.msg
     of ErrorEvent:
@@ -571,8 +619,7 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
     raise newException(CogiavelliError, "tokens and players must align")
   state.config = config
   state.sim = initSim(config)
-  state.prompts = newSeq[string](config.players.len)
-  state.scripted = newSeq[ScriptKind](config.players.len)
+  state.replies = initTable[int, JsonNode]()
   runtimeConfigGlobal = runtimeConfig
 
   let router = buildRouter(replayMode = false)

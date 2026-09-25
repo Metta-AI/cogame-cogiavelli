@@ -23,9 +23,7 @@ type
     sampled*: bool        ## true once the budget cap has been applied
     turnDelayMs*: int
     playerConnectTimeoutSeconds*: float
-    model*: string
-    maxOutputTokens*: int
-    llmTimeoutSeconds*: int
+    turnResponseTimeoutSeconds*: int
 
   UnitKind* = enum
     ukArmy = "A"
@@ -236,9 +234,7 @@ proc defaultGameConfig*(): GameConfig =
     episodeTimeoutSeconds: 1200,
     turnDelayMs: 300,
     playerConnectTimeoutSeconds: 180,
-    model: "claude-sonnet-5",
-    maxOutputTokens: 1200,
-    llmTimeoutSeconds: 45
+    turnResponseTimeoutSeconds: 70
   )
 
 proc update*(config: var GameConfig, configJson: string) =
@@ -271,11 +267,7 @@ proc update*(config: var GameConfig, configJson: string) =
   if node.hasKey("player_connect_timeout_seconds"):
     config.playerConnectTimeoutSeconds =
       node["player_connect_timeout_seconds"].getFloat()
-  if node.hasKey("model"):
-    config.model = node["model"].getStr()
-  if node.hasKey("maxOutputTokens"):
-    config.maxOutputTokens = node["maxOutputTokens"].getInt()
-  if node.hasKey("llmTimeoutSeconds"):
-    config.llmTimeoutSeconds = node["llmTimeoutSeconds"].getInt()
+  if node.hasKey("turnResponseTimeoutSeconds"):
+    config.turnResponseTimeoutSeconds = node["turnResponseTimeoutSeconds"].getInt()
   if config.years < 1:
     raise newException(CogiavelliError, "years must be at least 1")

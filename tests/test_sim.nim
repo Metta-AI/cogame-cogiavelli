@@ -25,26 +25,18 @@ proc newConfig(seed = 7, years = 2, press = true,
     result.tokens.add("t")
   result = sampleEpisode(result)
 
-proc scriptedAll(): seq[ScriptKind] =
-  for index in 0 ..< 6:
-    result.add(skCondottiere)
-
 proc playOut(config: GameConfig): Sim =
   var sim = initSim(config)
-  var client = LlmClient(disabled: true)
-  let prompts = newSeq[string](6)
-  let kinds = scriptedAll()
   var guard = 0
   while not sim.done and guard < 400:
     guard.inc
     let seats = sim.pendingSeats()
     check(seats.len > 0, "some seat is always pending until the end")
     let phase = sim.phase
-    let decisions = decideAll(client, sim, phase, seats, prompts, kinds)
-    for index, seat in seats:
+    for seat in seats:
       if sim.done:
         break
-      let decision = decisions[index]
+      let decision = scriptedAction(sim, seat, skCondottiere, phase)
       if phase == phPress:
         sim.applyPress(seat, decision.broadcast, decision.letters,
           decision.pledges, decision.notes, true)
@@ -55,9 +47,6 @@ proc playOut(config: GameConfig): Sim =
 
 block seasonSequencing:
   var sim = initSim(newConfig(press = true, years = 1))
-  var client = LlmClient(disabled: true)
-  let prompts = newSeq[string](6)
-  let kinds = scriptedAll()
   var order: seq[string]
   var guard = 0
   while not sim.done and guard < 200:
@@ -65,15 +54,15 @@ block seasonSequencing:
     order.add(seasonName(sim.season) & "/" & $sim.phase)
     let seats = sim.pendingSeats()
     let phase = sim.phase
-    let decisions = decideAll(client, sim, phase, seats, prompts, kinds)
-    for index, seat in seats:
+    for seat in seats:
       if sim.done:
         break
       if phase == phPress:
         sim.applyPress(seat, "", @[], @[], "", true)
       else:
-        sim.applyOrders(seat, decisions[index].orders, decisions[index].spend,
-          decisions[index].builds, "", true)
+        let decision = scriptedAction(sim, seat, skCondottiere, phase)
+        sim.applyOrders(seat, decision.orders, decision.spend,
+          decision.builds, "", true)
   check(order == @["SPRING/press", "SPRING/orders", "SUMMER/press",
     "SUMMER/orders", "AUTUMN/press", "AUTUMN/orders"],
     "press -> orders three times, then the year ends: " & order.join(" "))
@@ -122,16 +111,13 @@ block conquestAtTwelve:
     else:
       sim.owner[slot] = -1
   sim.board = newBoard(units)
-  var client = LlmClient(disabled: true)
-  let prompts = newSeq[string](6)
-  let kinds = scriptedAll()
   let seats = sim.pendingSeats()
-  let decisions = decideAll(client, sim, sim.phase, seats, prompts, kinds)
-  for index, seat in seats:
+  for seat in seats:
     if sim.done:
       break
-    sim.applyOrders(seat, decisions[index].orders, decisions[index].spend,
-      decisions[index].builds, "", true)
+    let decision = scriptedAction(sim, seat, skCondottiere, sim.phase)
+    sim.applyOrders(seat, decision.orders, decision.spend,
+      decision.builds, "", true)
   check(sim.reason == "conquest", "twelve cities ends the episode")
   check(sim.conqueror == power, "the conqueror is named")
   check(sim.score(0) == 1.0, "the conqueror scores 1.0")
@@ -147,16 +133,13 @@ block lastPowerStanding:
   sim.owner[CityIndex[VEN]] = power
   units.add(Unit(power: power, kind: ukArmy, province: VEN))
   sim.board = newBoard(units)
-  var client = LlmClient(disabled: true)
-  let prompts = newSeq[string](6)
-  let kinds = scriptedAll()
   let seats = sim.pendingSeats()
-  let decisions = decideAll(client, sim, sim.phase, seats, prompts, kinds)
-  for index, seat in seats:
+  for seat in seats:
     if sim.done:
       break
-    sim.applyOrders(seat, decisions[index].orders, decisions[index].spend,
-      decisions[index].builds, "", true)
+    let decision = scriptedAction(sim, seat, skCondottiere, sim.phase)
+    sim.applyOrders(seat, decision.orders, decision.spend,
+      decision.builds, "", true)
   check(sim.reason == "conquest" and sim.conqueror == power,
     "the last power owning a city wins outright")
 

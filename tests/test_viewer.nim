@@ -25,18 +25,12 @@ proc newConfig(): GameConfig =
 
 proc playOut(config: GameConfig): Sim =
   var sim = initSim(config)
-  var client = LlmClient(disabled: true)
-  let prompts = newSeq[string](6)
-  var kinds: seq[ScriptKind]
-  for index in 0 ..< 6:
-    kinds.add(skCondottiere)
   var guard = 0
   while not sim.done and guard < 400:
     guard.inc
     let seats = sim.pendingSeats()
     let phase = sim.phase
-    let decisions = decideAll(client, sim, phase, seats, prompts, kinds)
-    for index, seat in seats:
+    for seat in seats:
       if sim.done:
         break
       if phase == phPress:
@@ -48,8 +42,9 @@ proc playOut(config: GameConfig): Sim =
               "\U0001F91D")],
           @[], "vault: 12\u0111 \U0001F4B0", true)
       else:
-        sim.applyOrders(seat, decisions[index].orders,
-          decisions[index].spend, decisions[index].builds,
+        let decision = scriptedAction(sim, seat, skCondottiere, phase)
+        sim.applyOrders(seat, decision.orders,
+          decision.spend, decision.builds,
           "note \u2014 \U0001F5E1", true)
   sim
 
