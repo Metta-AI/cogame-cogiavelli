@@ -400,7 +400,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
             continue
           try:
             if not state.replies.hasKey(seat):
-              raise newException(CogiavelliError, "player reply timed out")
+              raise newException(CogiavelliError, "player reply missing")
             let reply = state.replies[seat]
             let action = reply["action"]
             let decision = if phase == phPress:
