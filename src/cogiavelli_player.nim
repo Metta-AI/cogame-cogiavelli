@@ -2,7 +2,7 @@
 
 import std/[json, options, os, strutils, times]
 import whisky
-import cogiavelli/[llm, jev_policy]
+import cogiavelli/llm
 
 const DefaultPrompt = """
 Take neutral cities first and hold them with a unit inside. Keep a reserve of
@@ -20,8 +20,7 @@ when isMainModule:
     quit("COWORLD_PLAYER_WS_URL is not set", 1)
   let prompt = getEnv("PLAYER_PROMPT", DefaultPrompt)
   let scripted = parseScriptKind(getEnv("PLAYER_SCRIPTED"))
-  let jev = getEnv("PLAYER_POLICY").strip().toLowerAscii() == "jev"
-  let client = if scripted == skNone and not jev: newLlmClient() else: nil
+  let client = if scripted == skNone: newLlmClient() else: nil
   let hostedTimeout = getEnv("COWORLD_TIMEOUT_SECONDS", "").strip()
   var timeoutSeconds = if hostedTimeout.len > 0:
     parseFloat(hostedTimeout) else: DefaultEpisodeTimeoutSeconds
@@ -43,19 +42,12 @@ when isMainModule:
       of "welcome":
         echo "cogiavelli player: seated at slot ", payload["slot"].getInt()
       of "turn":
-        let view = payload["view"]
         let baselines = payload["baselines"]
         var action: JsonNode
         var usedScript = false
         if scripted != skNone:
           action = baselines[$scripted]
           usedScript = true
-        elif jev:
-          if jevAvailable():
-            action = chooseJevAction(view, baselines, prompt)
-          else:
-            action = baselines["condottiere"]
-            usedScript = true
         elif client.disabled:
           action = baselines["condottiere"]
           usedScript = true

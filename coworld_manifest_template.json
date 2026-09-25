@@ -15,7 +15,7 @@
     "replay_viewer": {
       "bundle": "static-replay-viewer"
     },
-    "description": "Cogiavelli: Diplomacy's adjudicator on a Renaissance-Italy board, with a treasury bolted on. Six LLM-piloted powers - VENICE, MILAN, FLORENCE, the PAPACY, NAPLES and the TURK - contend for twenty-four Italian cities across three seasons a year. Every season each power writes press (non-binding), then submits, at the same moment as everyone else, one order per unit AND an expenditure sheet. Orders are Diplomacy's: HOLD, MOVE, SUPPORT and CONVOY, resolved by the full standard adjudicator (four strengths, cut supports, circular movement, the Szykman rule for convoy paradoxes). The expenditure sheet is what Diplomacy leaves out: GIFTS of ducats arrive instantly and irrevocably - the only promise in the game that cannot be broken; BRIBES disband an enemy unit for 9 ducats or buy it outright for 15; DEFEND payments raise what a briber must beat; and an ASSASSINATION of 6 to 30 ducats buys a two-dice roll that, if it lands, freezes a rival's whole court for a season. Money resolves BEFORE the armies move and is spent whether or not it works, and every ducat is published. Italy bites back: famine marks two provinces each Spring, plague empties one city each Summer, neglected cities rebel in Winter, and every unit costs upkeep. Whoever occupies a city owns it from that moment; hold 12 of the 24 and you win outright, otherwise you are scored on city share plus what is left in your vault. Seats play under anonymous power names and cog aliases, so no policy can recognise a counterparty across episodes and every side deal has to be paid for on the board. Each player receives its own observation and returns a complete press or orders action. Prompt, Jev, and scripted policies run in player containers; the game validates and resolves simultaneous decisions.",
+    "description": "Cogiavelli: Diplomacy's adjudicator on a Renaissance-Italy board, with a treasury bolted on. Six LLM-piloted powers - VENICE, MILAN, FLORENCE, the PAPACY, NAPLES and the TURK - contend for twenty-four Italian cities across three seasons a year. Every season each power writes press (non-binding), then submits, at the same moment as everyone else, one order per unit AND an expenditure sheet. Orders are Diplomacy's: HOLD, MOVE, SUPPORT and CONVOY, resolved by the full standard adjudicator (four strengths, cut supports, circular movement, the Szykman rule for convoy paradoxes). The expenditure sheet is what Diplomacy leaves out: GIFTS of ducats arrive instantly and irrevocably - the only promise in the game that cannot be broken; BRIBES disband an enemy unit for 9 ducats or buy it outright for 15; DEFEND payments raise what a briber must beat; and an ASSASSINATION of 6 to 30 ducats buys a two-dice roll that, if it lands, freezes a rival's whole court for a season. Money resolves BEFORE the armies move and is spent whether or not it works, and every ducat is published. Italy bites back: famine marks two provinces each Spring, plague empties one city each Summer, neglected cities rebel in Winter, and every unit costs upkeep. Whoever occupies a city owns it from that moment; hold 12 of the 24 and you win outright, otherwise you are scored on city share plus what is left in your vault. Seats play under anonymous power names and cog aliases, so no policy can recognise a counterparty across episodes and every side deal has to be paid for on the board. Each player receives its own observation and returns a complete press or orders action. Prompt and scripted policies run in player containers; the game validates and resolves simultaneous decisions.",
     "owner": "daveey@gmail.com",
     "runnable": {
       "type": "game",
@@ -332,29 +332,6 @@
         }
       },
       "source_url": "https://github.com/Metta-AI/cogame-cogiavelli/tree/main"
-    },
-    {
-      "type": "player",
-      "image": "{{COGIAVELLI_IMAGE}}",
-      "run": [
-        "/bin/cogiavelli-player"
-      ],
-      "resources": {
-        "requests": {
-          "cpu": "100m",
-          "memory": "64Mi"
-        },
-        "limits": {
-          "cpu": "1"
-        }
-      },
-      "source_url": "https://github.com/Metta-AI/cogame-cogiavelli/tree/main",
-      "id": "cogiavelli-jev",
-      "name": "Cogiavelli Jev Player",
-      "description": "Jev chooses press, one legal order per unit, spending, and builds from the private seat observation.",
-      "env": {
-        "PLAYER_POLICY": "jev"
-      }
     }
   ],
   "variants": [
@@ -454,7 +431,7 @@
     },
     "players": [
       {
-        "player_id": "cogiavelli-jev"
+        "player_id": "cogiavelli-player"
       },
       {
         "player_id": "cogiavelli-condottiere"
