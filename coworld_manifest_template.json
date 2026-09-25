@@ -15,7 +15,7 @@
     "replay_viewer": {
       "bundle": "static-replay-viewer"
     },
-    "description": "Cogiavelli: Diplomacy's adjudicator on a Renaissance-Italy board, with a treasury bolted on. Six LLM-piloted powers - VENICE, MILAN, FLORENCE, the PAPACY, NAPLES and the TURK - contend for twenty-four Italian cities across three seasons a year. Every season each power writes press (non-binding), then submits, at the same moment as everyone else, one order per unit AND an expenditure sheet. Orders are Diplomacy's: HOLD, MOVE, SUPPORT and CONVOY, resolved by the full standard adjudicator (four strengths, cut supports, circular movement, the Szykman rule for convoy paradoxes). The expenditure sheet is what Diplomacy leaves out: GIFTS of ducats arrive instantly and irrevocably - the only promise in the game that cannot be broken; BRIBES disband an enemy unit for 9 ducats or buy it outright for 15; DEFEND payments raise what a briber must beat; and an ASSASSINATION of 6 to 30 ducats buys a two-dice roll that, if it lands, freezes a rival's whole court for a season. Money resolves BEFORE the armies move and is spent whether or not it works, and every ducat is published. Italy bites back: famine marks two provinces each Spring, plague empties one city each Summer, neglected cities rebel in Winter, and every unit costs upkeep. Whoever occupies a city owns it from that moment; hold 12 of the 24 and you win outright, otherwise you are scored on city share plus what is left in your vault. Seats play under anonymous power names and cog aliases, so no policy can recognise a counterparty across episodes and every side deal has to be paid for on the board. The game is LLM-driven: the server sends each seat's policy prompt plus the board, the city table, every treasury, the two-year ledger, the press it received, the complete list of its legal orders and the exact price of every bribable enemy unit to Claude - so A POLICY IS JUST A PROMPT: build one by reusing the published player runnable and setting the PLAYER_PROMPT environment variable. Two scripted baselines (condottiere, banker) play any seat that registers as scripted, and every seat when no LLM credentials are available, so episodes always complete.",
+    "description": "Cogiavelli: Diplomacy's adjudicator on a Renaissance-Italy board, with a treasury bolted on. Six LLM-piloted powers - VENICE, MILAN, FLORENCE, the PAPACY, NAPLES and the TURK - contend for twenty-four Italian cities across three seasons a year. Every season each power writes press (non-binding), then submits, at the same moment as everyone else, one order per unit AND an expenditure sheet. Orders are Diplomacy's: HOLD, MOVE, SUPPORT and CONVOY, resolved by the full standard adjudicator (four strengths, cut supports, circular movement, the Szykman rule for convoy paradoxes). The expenditure sheet is what Diplomacy leaves out: GIFTS of ducats arrive instantly and irrevocably - the only promise in the game that cannot be broken; BRIBES disband an enemy unit for 9 ducats or buy it outright for 15; DEFEND payments raise what a briber must beat; and an ASSASSINATION of 6 to 30 ducats buys a two-dice roll that, if it lands, freezes a rival's whole court for a season. Money resolves BEFORE the armies move and is spent whether or not it works, and every ducat is published. Italy bites back: famine marks two provinces each Spring, plague empties one city each Summer, neglected cities rebel in Winter, and every unit costs upkeep. Whoever occupies a city owns it from that moment; hold 12 of the 24 and you win outright, otherwise you are scored on city share plus what is left in your vault. Seats play under anonymous power names and cog aliases, so no policy can recognise a counterparty across episodes and every side deal has to be paid for on the board. Each player receives its own observation and returns a complete press or orders action. Prompt, Jev, and scripted policies run in player containers; the game validates and resolves simultaneous decisions.",
     "owner": "daveey@gmail.com",
     "runnable": {
       "type": "game",
@@ -23,9 +23,6 @@
       "run": [
         "/bin/cogiavelli"
       ],
-      "env": {
-        "ANTHROPIC_API_KEY_URI": "secret://coworld/cogiavelli/anthropic_api_key"
-      },
       "source_url": "https://github.com/Metta-AI/cogame-cogiavelli/tree/main"
     },
     "config_schema": {
@@ -102,27 +99,17 @@
           "maximum": 10000,
           "default": 300
         },
-        "model": {
-          "description": "Claude model that drives every seat over the direct Anthropic transport.",
-          "type": "string",
-          "default": "claude-sonnet-5"
-        },
-        "maxOutputTokens": {
-          "type": "integer",
-          "minimum": 64,
-          "maximum": 2000,
-          "default": 1200
-        },
-        "llmTimeoutSeconds": {
-          "type": "integer",
-          "minimum": 5,
-          "maximum": 300,
-          "default": 45
-        },
         "player_connect_timeout_seconds": {
           "type": "number",
           "minimum": 0,
           "default": 180
+        },
+        "turnResponseTimeoutSeconds": {
+          "description": "Seconds to wait for each player action before a scripted fallback.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300,
+          "default": 70
         }
       }
     },
@@ -247,7 +234,7 @@
     "protocols": {
       "player": {
         "type": "text",
-        "value": "cogiavelli.player.v1 - JSON text frames over the websocket named by COWORLD_PLAYER_WS_URL (already carrying ?slot=N&token=T). A Cogiavelli policy is a prompt: the player container's only job is to deliver it; the game server makes every decision by sending that prompt plus the seat's view to Claude, as ONE parallel batch per phase for all six seats. game->player frames: {\"type\":\"welcome\",\"protocol\":\"cogiavelli.player.v1\",\"slot\":N,\"power\":\"VENICE\",\"name\":\"Sprocket\",\"years\":int,\"press\":bool} on connect; {\"type\":\"state\",\"slot\":N,\"power\":str,\"year\":int,\"season\":spring|summer|autumn|winter,\"phase\":press|orders|resolve|winter,\"years\":int,\"yearsPlayed\":int,\"cities\":int,\"ducats\":int,\"units\":[own units],\"board\":[every unit],\"owners\":[24 city rows],\"counts\":[6],\"treasuries\":[6],\"famine\":[codes],\"plague\":code,\"paralysed\":bool,\"inbox\":[{from,text,public}],\"eliminated\":bool,\"started\":bool,\"done\":bool,\"reason\":str} after every event - REDACTED: the whole public board, the public city table and every treasury are visible, but no other power's pending orders, pending expenditure, private letters or notes ever are; {\"type\":\"final\",\"done\":true,\"slot\":N,\"scores\":[6],\"cities\":[6],\"ducats\":[6],\"units\":[6],\"powers\":[6],\"names\":[6 cog aliases],\"years\":int,\"reason\":str,\"conqueror\":str} at episode end, after which the player should exit. player->game frames: {\"type\":\"prompt\",\"prompt\":str,\"scripted\":str} - the prompt (at most 4000 runes) IS the policy; send it after connect and again after welcome; the latest frame applies to all later calls. \"scripted\" is \"condottiere\" (or \"1\"/\"true\"/\"yes\") for the scripted expander, \"banker\" (or \"miser\") for the scripted hoarder, and \"\" for an LLM-driven seat. The published cogiavelli-player runnable reads its prompt from PLAYER_PROMPT and its baseline from PLAYER_SCRIPTED, so a new policy is `coworld upload-policy` of the same image with --secret-env PLAYER_PROMPT=\"<your strategy>\"."
+        "value": "cogiavelli.player.v2 JSON websocket protocol. Game sends welcome, seat state, and {\"type\":\"turn\",\"id\":N,\"view\":private seat observation,\"system\":rules text,\"user\":phase context,\"baselines\":{condottiere,banker}}. The view includes public board, cities and treasuries, own inbox and notes, and each own unit’s complete legal order menu. Player replies {\"type\":\"decision\",\"id\":N,\"action\":press or orders object,\"scripted\":boolean}. Press action has broadcast, letters, pledges and notes. Orders action has orders, spend, builds and notes. The game validates actions, applies its condottiere fallback to missing or invalid replies, and sends final scores."
       },
       "global": {
         "type": "text",
@@ -257,7 +244,7 @@
     "docs": {
       "readme": {
         "type": "text",
-        "value": "Cogiavelli is Diplomacy on a Renaissance-Italy board with a treasury bolted on: six LLM-piloted powers, twenty-four cities, three seasons a year, simultaneous orders - and an expenditure sheet submitted in the same breath as the orders. Ducats are the other army. A gift arrives and can never be taken back (the only binding promise in the game); nine ducats disband an enemy unit and fifteen buy it outright; a defence payment raises what a briber must beat; six to thirty ducats buy a two-dice roll at a rival's life, and a hit freezes their whole court for a season. Money resolves BEFORE the armies move and is spent whether or not it works. Between years famine starves provinces, plague empties a city, neglected cities rebel and every unit costs upkeep. Hold 12 of the 24 cities and you win outright; otherwise you are scored on your share of the cities plus what is left in your vault. A policy is just a prompt: field one by reusing the published cogiavelli-player runnable with PLAYER_PROMPT set to your strategy. With no LLM credentials (or for seats that register scripted) the server plays the condottiere or banker baselines, so episodes always complete."
+        "value": "Cogiavelli is Diplomacy on a Renaissance-Italy board with a treasury bolted on: six LLM-piloted powers, twenty-four cities, three seasons a year, simultaneous orders - and an expenditure sheet submitted in the same breath as the orders. Ducats are the other army. A gift arrives and can never be taken back (the only binding promise in the game); nine ducats disband an enemy unit and fifteen buy it outright; a defence payment raises what a briber must beat; six to thirty ducats buy a two-dice roll at a rival's life, and a hit freezes their whole court for a season. Money resolves BEFORE the armies move and is spent whether or not it works. Between years famine starves provinces, plague empties a city, neglected cities rebel and every unit costs upkeep. Hold 12 of the 24 cities and you win outright; otherwise you are scored on your share of the cities plus what is left in your vault. Each player chooses press and orders actions from its private observation. The game validates and resolves simultaneous actions."
       },
       "pages": [
         {
@@ -273,7 +260,7 @@
           "title": "map.md",
           "content": {
             "type": "text",
-            "value": "# The Cogiavelli board - Italy, 1499\n\n42 areas: 36 land provinces (24 of them cities) and 6 seas. There are NO SPLIT COASTS anywhere: every\nprovince that touches two seas touches two ADJACENT seas, so `SPA/NC`-style coast notation does not\nexist and never has to be disambiguated.\n\n## The land\n\n| code | name | kind | city | land neighbours | seas |\n|---|---|---|---|---|---|\n| TUR | Turin | inland | neutral | SAV PAV GEN MIL | - |\n| SAV | Savoy | inland | | TUR GEN PAV | - |\n| COM | Como | inland | MILAN | MIL TRE | - |\n| MIL | Milan | inland | MILAN | TUR COM PAV MAN | - |\n| PAV | Pavia | inland | MILAN | TUR SAV MIL GEN MAN MOD | - |\n| GEN | Genoa | coastal | neutral | TUR SAV PAV MOD PIS | LIG |\n| TRE | Trent | inland | | COM VER MAN | - |\n| MAN | Mantua | inland | | MIL PAV TRE VER MOD FER | - |\n| VER | Verona | inland | VENICE | TRE MAN PAD FER | - |\n| PAD | Padua | inland | VENICE | VER VEN FER FRI | - |\n| VEN | Venice | coastal | VENICE | PAD FRI FER | UAD |\n| FRI | Friuli | coastal | | PAD VEN TRI | UAD |\n| TRI | Trieste | coastal | neutral | FRI BOS | UAD |\n| FER | Ferrara | coastal | neutral | MAN VER PAD VEN BOL RMG | UAD |\n| MOD | Modena | inland | | GEN PAV MAN BOL PIS | - |\n| BOL | Bologna | inland | neutral | FER MOD RMG FLO | - |\n| RMG | Romagna | coastal | | FER BOL FLO URB | UAD |\n| PIS | Pisa | coastal | FLORENCE | GEN MOD FLO SIE | LIG UTS |\n| FLO | Florence | inland | FLORENCE | BOL RMG PIS SIE URB | - |\n| SIE | Siena | inland | FLORENCE | PIS FLO PER ROM | - |\n| URB | Urbino | inland | | RMG FLO PER ANC | - |\n| ANC | Ancona | coastal | PAPACY | URB PER ABR | LAD |\n| PER | Perugia | inland | PAPACY | SIE URB ANC ROM ABR | - |\n| ROM | Rome | coastal | PAPACY | SIE PER ABR NAP | UTS LTS |\n| ABR | Abruzzi | coastal | | ANC PER ROM NAP APU | LAD |\n| NAP | Naples | coastal | NAPLES | ROM ABR APU CAL | LTS |\n| APU | Apulia | coastal | | ABR NAP BAR CAL | LAD |\n| BAR | Bari | coastal | NAPLES | APU CAL | LAD |\n| CAL | Calabria | coastal | | NAP APU BAR | LTS ION |\n| MES | Messina | coastal | neutral | PAL | LTS ION |\n| PAL | Palermo | coastal | NAPLES | MES | LTS |\n| BOS | Bosnia | inland | | TRI RAG ALB | - |\n| RAG | Ragusa | coastal | TURK | BOS ALB | LAD |\n| ALB | Albania | inland | | BOS RAG DUR AVL | - |\n| DUR | Durazzo | coastal | TURK | ALB AVL | LAD |\n| AVL | Avlona | coastal | TURK | ALB DUR | LAD ION |\n\n## The seas\n\nLIG Ligurian Sea (touches UTS) - UTS Upper Tyrrhenian Sea (LIG, LTS) - LTS Lower Tyrrhenian Sea\n(UTS, ION) - ION Ionian Sea (LTS, LAD) - LAD Lower Adriatic Sea (ION, UAD) - UAD Upper Adriatic Sea\n(LAD). A sea is adjacent to exactly the coastal provinces that list it in the table above.\n\n## The 24 cities\n\nHome cities (18): VEN PAD VER (Venice) - MIL PAV COM (Milan) - FLO PIS SIE (Florence) -\nROM ANC PER (Papacy) - NAP BAR PAL (Naples) - RAG DUR AVL (Turk).\nNeutral at start (6): TUR GEN TRI FER BOL MES.\n\n## The two movement graphs\n\n- ARMIES move on the land-neighbour column, land provinces only. An army never enters a sea and is\n  never adjacent to one.\n- FLEETS move on: sea-to-sea edges; sea to each of its coastal provinces; COAST-HOPS, meaning two\n  coastal provinces that are land-adjacent AND share at least one sea (GEN-PIS on the Ligurian,\n  DUR-AVL on the Lower Adriatic; BAR-CAL is NOT a coast-hop, because they share no sea); and exactly\n  one fleet-only edge, CAL-MES, THE STRAIT OF MESSINA. A fleet never enters an inland province.\n- AN ARMY REACHES SICILY (MES, PAL) ONLY BY CONVOY. Sicily is the only part of the land graph that is\n  not connected to the mainland by land.\n\n## The 18 starting units\n\nVenice A VER, A PAD, F VEN - Milan A MIL, A PAV, A COM - Florence A FLO, A SIE, F PIS -\nPapacy A ROM, A PER, F ANC - Naples A NAP, A BAR, F PAL - Turk A DUR, A AVL, F RAG.\nEvery power starts with 12 ducats.\n\n## Order notation\n\nOne grammar, whitespace- and case-tolerant; `-`, `-` and `->` all read as a move, and\nS/SUPPORT, C/CONVOY, H/HOLD/HOLDS are all accepted.\n\n    A VER H                  the army in Verona holds\n    A VER - MAN              the army in Verona moves to Mantua\n    A BAR - PAL VIA CONVOY   the army in Bari is carried to Palermo by sea\n    F VEN S A PAD - FER      the fleet in Venice supports Padua's move to Ferrara\n    F VEN S A PAD            the fleet in Venice supports Padua's hold\n    F LAD C A BAR - RAG      the fleet in the Lower Adriatic convoys Bari to Ragusa\n\nWorked examples:\n\n    A URB - ANC  +  A PER S A URB - ANC   beats  F ANC H         Ancona is taken, the fleet retreats\n    A VER - MAN  +  A MOD - MAN                                   both bounce, STANDOFF in Mantua\n    A MAN - VER  cuts  A VER S A PAD - FER                        so the attack on Ferrara fails\n    A BAR - AVL VIA CONVOY  +  F LAD C A BAR - AVL                the army crosses the Adriatic\n\nEach seat is handed the COMPLETE list of legal orders for each of its own units, in exactly this\nnotation, in its orders prompt; an order that is not on that list becomes a hold.\n"
+            "value": "# The Cogiavelli board - Italy, 1499\n\n42 areas: 36 land provinces (24 of them cities) and 6 seas. There are NO SPLIT COASTS anywhere: every\nprovince that touches two seas touches two ADJACENT seas, so `SPA/NC`-style coast notation does not\nexist and never has to be disambiguated.\n\n## The land\n\n| code | name | kind | city | land neighbours | seas |\n|---|---|---|---|---|---|\n| TUR | Turin | inland | neutral | SAV PAV GEN MIL | - |\n| SAV | Savoy | inland | | TUR GEN PAV | - |\n| COM | Como | inland | MILAN | MIL TRE | - |\n| MIL | Milan | inland | MILAN | TUR COM PAV MAN | - |\n| PAV | Pavia | inland | MILAN | TUR SAV MIL GEN MAN MOD | - |\n| GEN | Genoa | coastal | neutral | TUR SAV PAV MOD PIS | LIG |\n| TRE | Trent | inland | | COM VER MAN | - |\n| MAN | Mantua | inland | | MIL PAV TRE VER MOD FER | - |\n| VER | Verona | inland | VENICE | TRE MAN PAD FER | - |\n| PAD | Padua | inland | VENICE | VER VEN FER FRI | - |\n| VEN | Venice | coastal | VENICE | PAD FRI FER | UAD |\n| FRI | Friuli | coastal | | PAD VEN TRI | UAD |\n| TRI | Trieste | coastal | neutral | FRI BOS | UAD |\n| FER | Ferrara | coastal | neutral | MAN VER PAD VEN BOL RMG | UAD |\n| MOD | Modena | inland | | GEN PAV MAN BOL PIS | - |\n| BOL | Bologna | inland | neutral | FER MOD RMG FLO | - |\n| RMG | Romagna | coastal | | FER BOL FLO URB | UAD |\n| PIS | Pisa | coastal | FLORENCE | GEN MOD FLO SIE | LIG UTS |\n| FLO | Florence | inland | FLORENCE | BOL RMG PIS SIE URB | - |\n| SIE | Siena | inland | FLORENCE | PIS FLO PER ROM | - |\n| URB | Urbino | inland | | RMG FLO PER ANC | - |\n| ANC | Ancona | coastal | PAPACY | URB PER ABR | LAD |\n| PER | Perugia | inland | PAPACY | SIE URB ANC ROM ABR | - |\n| ROM | Rome | coastal | PAPACY | SIE PER ABR NAP | UTS LTS |\n| ABR | Abruzzi | coastal | | ANC PER ROM NAP APU | LAD |\n| NAP | Naples | coastal | NAPLES | ROM ABR APU CAL | LTS |\n| APU | Apulia | coastal | | ABR NAP BAR CAL | LAD |\n| BAR | Bari | coastal | NAPLES | APU CAL | LAD |\n| CAL | Calabria | coastal | | NAP APU BAR | LTS ION |\n| MES | Messina | coastal | neutral | PAL | LTS ION |\n| PAL | Palermo | coastal | NAPLES | MES | LTS |\n| BOS | Bosnia | inland | | TRI RAG ALB | - |\n| RAG | Ragusa | coastal | TURK | BOS ALB | LAD |\n| ALB | Albania | inland | | BOS RAG DUR AVL | - |\n| DUR | Durazzo | coastal | TURK | ALB AVL | LAD |\n| AVL | Avlona | coastal | TURK | ALB DUR | LAD ION |\n\n## The seas\n\nLIG Ligurian Sea (touches UTS) - UTS Upper Tyrrhenian Sea (LIG, LTS) - LTS Lower Tyrrhenian Sea\n(UTS, ION) - ION Ionian Sea (LTS, LAD) - LAD Lower Adriatic Sea (ION, UAD) - UAD Upper Adriatic Sea\n(LAD). A sea is adjacent to exactly the coastal provinces that list it in the table above.\n\n## The 24 cities\n\nHome cities (18): VEN PAD VER (Venice) - MIL PAV COM (Milan) - FLO PIS SIE (Florence) -\nROM ANC PER (Papacy) - NAP BAR PAL (Naples) - RAG DUR AVL (Turk).\nNeutral at start (6): TUR GEN TRI FER BOL MES.\n\n## The two movement graphs\n\n- ARMIES move on the land-neighbour column, land provinces only. An army never enters a sea and is\n  never adjacent to one.\n- FLEETS move on: sea-to-sea edges; sea to each of its coastal provinces; COAST-HOPS, meaning two\n  coastal provinces that are land-adjacent AND share at least one sea (GEN-PIS on the Ligurian,\n  DUR-AVL on the Lower Adriatic; BAR-CAL is NOT a coast-hop, because they share no sea); and exactly\n  one fleet-only edge, CAL-MES, THE STRAIT OF MESSINA. A fleet never enters an inland province.\n- AN ARMY REACHES SICILY (MES, PAL) ONLY BY CONVOY. Sicily is the only part of the land graph that is\n  not connected to the mainland by land.\n\n## The 18 starting units\n\nVenice A VER, A PAD, F VEN - Milan A MIL, A PAV, A COM - Florence A FLO, A SIE, F PIS -\nPapacy A ROM, A PER, F ANC - Naples A NAP, A BAR, F PAL - Turk A DUR, A AVL, F RAG.\nEvery power starts with 12 ducats.\n\n## Order notation\n\nOne grammar, whitespace- and case-tolerant; `-`, `-` and `->` all read as a move, and\nS/SUPPORT, C/CONVOY, H/HOLD/HOLDS are all accepted.\n\n    A VER H                  the army in Verona holds\n    A VER - MAN              the army in Verona moves to Mantua\n    A BAR - PAL VIA CONVOY   the army in Bari is carried to Palermo by sea\n    F VEN S A PAD - FER      the fleet in Venice supports Padua's move to Ferrara\n    F VEN S A PAD            the fleet in Venice supports Padua's hold\n    F LAD C A BAR - RAG      the fleet in the Lower Adriatic convoys Bari to Ragusa\n\nWorked examples:\n\n    A URB - ANC  +  A PER S A URB - ANC   beats  F ANC H         Ancona is taken, the fleet retreats\n    A VER - MAN  +  A MOD - MAN                                   both bounce, STANDOFF in Mantua\n    A MAN - VER  cuts  A VER S A PAD - FER                        so the attack on Ferrara fails\n    A BAR - AVL VIA CONVOY  +  F LAD C A BAR - AVL                the army crosses the Adriatic\n\nEach seat is handed the COMPLETE list of legal orders for each of its own units, in exactly this\nnotation, in its orders observation; an order that is not on that list becomes a hold.\n"
           }
         }
       ]
@@ -284,7 +271,7 @@
       "id": "cogiavelli-player",
       "name": "Cogiavelli Prompt Player",
       "type": "player",
-      "description": "The reference Cogiavelli policy: delivers its PLAYER_PROMPT (or a default strategy) to the game and spectates until the final frame. Field your own policy by uploading this same image with a different PLAYER_PROMPT.",
+      "description": "Prompt player: chooses complete press and orders actions from its private observation. Set PLAYER_PROMPT for a custom strategy. Model credentials belong to the player container.",
       "image": "{{COGIAVELLI_IMAGE}}",
       "run": [
         "/bin/cogiavelli-player"
@@ -304,7 +291,7 @@
       "id": "cogiavelli-condottiere",
       "name": "Cogiavelli Condottiere Baseline",
       "type": "player",
-      "description": "The scripted expander as a fieldable policy: registers its seat as rule-based, so the server plays it deterministically with no LLM. It walks its units toward the nearest city it does not own, never stands itself off, disbands a threatening neighbour for nine ducats when it can afford to, and builds in Winter while upkeep stays covered.",
+      "description": "Scripted condottiere player: chooses a complete expansion plan from its observation.",
       "image": "{{COGIAVELLI_IMAGE}}",
       "run": [
         "/bin/cogiavelli-player"
@@ -327,7 +314,7 @@
       "id": "cogiavelli-banker",
       "name": "Cogiavelli Banker Baseline",
       "type": "player",
-      "description": "The scripted hoarder as a fieldable policy: every unit holds or supports a neighbour's hold, four ducats of loyalty go onto each garrison while the vault is deep, and it builds only when very rich. It never attacks, never bribes and never assassinates - the wall that cannot be talked into anything.",
+      "description": "Scripted banker player: chooses a complete defensive plan from its observation.",
       "image": "{{COGIAVELLI_IMAGE}}",
       "run": [
         "/bin/cogiavelli-player"
@@ -345,6 +332,29 @@
         }
       },
       "source_url": "https://github.com/Metta-AI/cogame-cogiavelli/tree/main"
+    },
+    {
+      "type": "player",
+      "image": "{{COGIAVELLI_IMAGE}}",
+      "run": [
+        "/bin/cogiavelli-player"
+      ],
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-cogiavelli/tree/main",
+      "id": "cogiavelli-jev",
+      "name": "Cogiavelli Jev Player",
+      "description": "Jev chooses press, one legal order per unit, spending, and builds from the private seat observation.",
+      "env": {
+        "PLAYER_POLICY": "jev"
+      }
     }
   ],
   "variants": [

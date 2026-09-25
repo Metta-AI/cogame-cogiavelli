@@ -38,13 +38,12 @@ treasury term worth at most one city.
 The full rules are in the manifest's `rules.md`; the board is in `map.md`; the design note is
 [`docs/plans/2026-08-24-cogiavelli-design.md`](docs/plans/2026-08-24-cogiavelli-design.md).
 
-## A policy is just a prompt
+## Player policies
 
-The player container's only job is to deliver a prompt. The game server composes each seat's view —
-the whole board, the city table, **every** treasury, the two-year ledger, the press that seat
-received, the **complete list of its legal orders** in the exact notation a reply must use, and the
-**exact price of every bribable enemy unit** — and asks Claude what to write, order and spend. All
-six seats go out as **one parallel batch per phase**.
+The game sends each player its private observation and accepts a complete press or orders action.
+The observation includes the board, cities, treasuries, the seat's inbox and notes, and every legal
+order for each of its units. Prompt and Jev model calls run inside player containers. The game
+validates simultaneous replies and applies a scripted fallback when a reply is missing or invalid.
 
 ```bash
 coworld upload-policy coworld-cogiavelli:latest \
@@ -52,8 +51,12 @@ coworld upload-policy coworld-cogiavelli:latest \
   --secret-env PLAYER_PROMPT="Take the neutral cities first and garrison them…"
 ```
 
-Two scripted baselines ship in the same image, env-switched, and play any seat that registers as
-scripted — and **every** seat when no LLM credentials are available, so episodes always complete:
+Set `PLAYER_POLICY=jev` to let Jev choose press, one legal order per unit, spending, and builds.
+It uses its Bedrock sidecar or `TYPESAFE_API_KEY` and `TYPESAFE_BASE_URL`. Its press text comes from
+a finite menu, so it cannot compose original negotiations.
+
+Two scripted baselines ship in the same image and are selected with `PLAYER_SCRIPTED`. They also
+play prompt seats when no model credentials are available:
 
 * `PLAYER_SCRIPTED=condottiere` — the expander. Walks toward the nearest city it does not own,
   never stands itself off, disbands a threatening neighbour for nine ducats, builds while upkeep
@@ -64,7 +67,7 @@ scripted — and **every** seat when no LLM credentials are available, so episod
 ## Two name spaces
 
 In game a seat is **only ever a power name** — `VENICE` — plus an anonymous cog alias. Prompts,
-press, orders and the player socket never carry a policy name, a player name or a slot index, and
+press and orders never carry a policy name or player name, and
 `tests/test_sim.nim` scans every built prompt for every configured policy name to keep it that way.
 Spectator-side the replay carries `powers`, `names` (aliases) **and** `policyNames`, so the viewer
 renders `VENICE · daveey` and `results.json` attributes by policy.
@@ -79,7 +82,8 @@ renders `VENICE · daveey` and `results.json` attributes by policy.
 | `src/cogiavelli/adjudicate.nim` | the Diplomacy core: four strengths, cut supports, circular movement, Szykman |
 | `src/cogiavelli/money.nim` | payment, daggers, bribes, and Winter's rebellions, famine, income, upkeep and builds |
 | `src/cogiavelli/sim.nim` | the episode: seasons, the shock stream, scoring, `tableStateJson`, `replayMatch` |
-| `src/cogiavelli/llm.nim` | one batched `decideAll` per phase, the prompts, the reply parsers, the baselines |
+| `src/cogiavelli/llm.nim` | player model client, prompt text, reply parsers, and scripted baselines |
+| `src/cogiavelli/jev_policy.nim` | player Jev choices over press, legal orders, spending, and builds |
 | `src/cogiavelli/server.nim` | the Coworld game contract, the season loop, the artifacts |
 | `client/` | the viewer chrome — `cogame-babel`'s `renderer.js` and `chrome.css` with an appended Cogiavelli block |
 | `replay-viewer/` | the static wasm bundle: the **same** sim compiled to wasm, so the browser re-derives every frame |

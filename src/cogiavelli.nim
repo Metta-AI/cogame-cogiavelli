@@ -41,6 +41,5 @@ when isMainModule:
     config = sampleEpisode(config)
     echo "cogiavelli: seats=", config.players.len,
       " years=", config.years,
-      " press=", config.press,
-      " model=", config.model
+      " press=", config.press
     runGameServer(config, runtimeConfig)

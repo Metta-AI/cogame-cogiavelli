@@ -1,16 +1,6 @@
-## Claude-backed decision making for Cogiavelli. Each seat's policy is
-## just a prompt: the game server composes that seat's view — the board,
-## the city table, every treasury, the ledger, the press it received, the
-## complete legal order set for each of its units and the exact price of
-## every bribable enemy unit — plus the seat's prompt, and asks Claude what
-## it writes, orders and spends.
-##
-## All six powers decide simultaneously by rule, so EVERY phase fires its
-## requests as ONE `curly.makeRequests` batch — never seat by seat. The
-## loop is bullwhip's `decideAll`: build one batch over the still-open
-## seats, parse each reply, re-batch the failures once with an
-## invalid-reply hint, then fall back to the scripted baseline for whatever
-## is still open.
+## Player model transport and Cogiavelli's shared policy text, reply parser,
+## and scripted baselines. The game sends private seat observations and
+## validates complete press or orders replies; model calls run in players.
 ##
 ## Credentials, in order of preference:
 ##   Bedrock sidecar / bearer token   - hosted pods
@@ -30,8 +20,6 @@ const
   AnthropicUrl = "https://api.anthropic.com/v1/messages"
   AnthropicVersion = "2023-06-01"
   BedrockAnthropicVersion = "bedrock-2023-05-31"
-  InvalidHint = "\nYour previous reply was invalid. Respond with ONLY the " &
-    "requested JSON object."
 
 type
   ScriptKind* = enum
@@ -144,11 +132,11 @@ proc bedrockUrl(client: LlmClient): string =
   client.bedrockEndpoint & "/model/" &
     client.bedrockModels[client.bedrockModel] & "/invoke"
 
-proc newLlmClient*(config: GameConfig): LlmClient =
+proc newLlmClient*(): LlmClient =
   result = LlmClient(
-    model: config.model,
-    maxOutputTokens: config.maxOutputTokens,
-    timeoutSeconds: config.llmTimeoutSeconds
+    model: getEnv("PLAYER_MODEL", "claude-sonnet-5"),
+    maxOutputTokens: parseInt(getEnv("PLAYER_MAX_OUTPUT_TOKENS", "1200")),
+    timeoutSeconds: parseInt(getEnv("PLAYER_MODEL_TIMEOUT_SECONDS", "45"))
   )
   let bedrockEndpoint = getEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME").strip()
   let bedrockToken = getEnv("AWS_BEARER_TOKEN_BEDROCK").strip()
@@ -509,7 +497,7 @@ proc treasuryText(sim: Sim): string =
     parts.add(PowerNames[power] & " " & $sim.treasury[power] & "\u0111")
   parts.join(" \u00b7 ")
 
-proc ledgerText(sim: Sim): string =
+proc ledgerText*(sim: Sim): string =
   ## The resolved ledger of the last two years — 2 x SeasonsPerYear resolved
   ## seasons, the same window `historyText` shows orders for. `sim.ledger`
   ## is the whole-episode record the endcard draws; the prompt gets the
@@ -544,7 +532,7 @@ proc ledgerText(sim: Sim): string =
     lines = lines[lines.len - 40 .. ^1]
   lines.join("\n")
 
-proc historyText(sim: Sim, power: int): string =
+proc historyText*(sim: Sim, power: int): string =
   var lines: seq[string]
   var start = 0
   if sim.history.len > 6:
@@ -616,7 +604,7 @@ proc legalOrderText(sim: Sim, power: int): string =
     return "  (you have no units)"
   lines.join("\n")
 
-proc bribeMenuText(sim: Sim, power: int): string =
+proc bribeMenuText*(sim: Sim, power: int): string =
   ## The price list, exactly as the validator applies it. The defender's
   ## own `defend` entries ride in the SAME simultaneous batch, so what they
   ## add to these prices is unknowable at prompt time — the menu quotes the
@@ -937,56 +925,10 @@ proc textOf(client: LlmClient, response: Response, error, url: string):
     raise newException(CogiavelliError, "reply cut off at max_tokens before " &
       "any JSON: " & result[0 .. min(result.high, 160)].replace("\n", " "))
 
-proc decideAll*(
-  client: LlmClient,
-  sim: Sim,
-  phase: PhaseKind,
-  seats: seq[int],
-  prompts: seq[string],
-  scripted: seq[ScriptKind]
-): seq[Decision] =
-  ## One decision per seat in `seats`, in order, from ONE parallel batch.
-  ## Never raises: any failure falls back to the scripted baseline so the
-  ## episode always advances. `prompts` and `scripted` are indexed by SEAT.
-  result = newSeq[Decision](seats.len)
-  var open: seq[int]
-  for index, seat in seats:
-    let kind = scripted[seat]
-    if kind != skNone or client.disabled:
-      result[index] = scriptedAction(sim, seat,
-        (if kind == skNone: skCondottiere else: kind), phase)
-    else:
-      open.add(index)
-  for attempt in 0 .. 1:
-    if open.len == 0 or client.disabled:
-      break
-    var batch: RequestBatch
-    for index in open:
-      let seat = seats[index]
-      var user =
-        if phase == phPress: pressPrompt(sim, seat, prompts[seat])
-        else: ordersPrompt(sim, seat, prompts[seat])
-      if attempt > 0:
-        user.add(InvalidHint)
-      let request = client.requestFor(systemPrompt(sim, seat), user)
-      batch.post(request.url, request.headers, request.body, $index)
-    let responses = client.curl.makeRequests(batch, client.timeoutSeconds)
-    var stillOpen: seq[int]
-    for position, index in open:
-      let seat = seats[index]
-      try:
-        let text = client.textOf(responses[position].response,
-          responses[position].error, batch[position].url)
-        let payload = extractJsonObject(text)
-        result[index] =
-          if phase == phPress: parsePress(sim, seat, payload)
-          else: parseOrdersReply(sim, seat, payload)
-      except CatchableError as error:
-        echo "cogiavelli llm: seat ", seat, " attempt ", attempt, " failed: ",
-          error.msg
-        stillOpen.add(index)
-    open = stillOpen
-  for index in open:
-    let seat = seats[index]
-    echo "cogiavelli: seat ", seat, " falling back to scripted decision"
-    result[index] = scriptedAction(sim, seat, skCondottiere, phase)
+proc completeJson*(client: LlmClient, system, user: string): JsonNode =
+  let request = client.requestFor(system, user)
+  var batch: RequestBatch
+  batch.post(request.url, request.headers, request.body, "0")
+  let response = client.curl.makeRequests(batch, client.timeoutSeconds)[0]
+  client.textOf(response.response, response.error, request.url)
+    .extractJsonObject()

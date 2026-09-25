@@ -28,21 +28,17 @@ type Audit = object
 
 proc play(config: GameConfig, kinds: seq[ScriptKind]): Audit =
   var sim = initSim(config)
-  var client = LlmClient(disabled: true)
-  let prompts = newSeq[string](6)
   var calls = 0
   var guard = 0
   while not sim.done and guard < 600:
     guard.inc
     let seats = sim.pendingSeats()
     let phase = sim.phase
-    let decisions = decideAll(client, sim, phase, seats, prompts, kinds)
     calls.inc
-    for index, seat in seats:
+    for seat in seats:
       if sim.done:
         break
-      let decision = decisions[index]
-      check(decision.scripted, "a disabled client always answers scripted")
+      let decision = scriptedAction(sim, seat, kinds[seat], phase)
       if phase == phOrders:
         check(decision.spend.len <= MaxSpendEntries,
           "no spend array exceeds six entries")
@@ -160,22 +156,6 @@ block aBaselineThatCannotBeatAWallIsNoBaseline:
     check(expander > sim.cities(seat),
       "the condottiere must end with more cities than every banker: " &
         $expander & " vs " & $sim.cities(seat))
-
-block noNetworkWithoutCredentials:
-  let config = newConfig(2, 1, false)
-  var sim = initSim(config)
-  ## A client with no transport at all: any network call would crash on the
-  ## nil Curly handle, so reaching the end proves none was made.
-  var client = LlmClient(disabled: true)
-  var kinds: seq[ScriptKind]
-  for index in 0 ..< 6:
-    kinds.add(skNone)
-  let decisions = decideAll(client, sim, sim.phase, sim.pendingSeats(),
-    newSeq[string](6), kinds)
-  check(decisions.len == 6, "six decisions come back")
-  for decision in decisions:
-    check(decision.scripted, "every one of them is scripted")
-    check(decision.orders.len > 0, "and carries real orders")
 
 block finishesFast:
   var kinds: seq[ScriptKind]
