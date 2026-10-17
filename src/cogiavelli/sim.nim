@@ -930,6 +930,67 @@ proc pledgeJson(pledge: Pledge): JsonNode =
     "broken": pledge.broken
   }
 
+proc observationJson*(sim: Sim, slot: int): JsonNode =
+  ## The whole public board, the public city table and every treasury —
+  ## plus this seat's own units and inbox, and nothing of any other power's
+  ## pending orders, pending expenditure, private letters or notes.
+  let power = sim.powerOf[slot]
+  var board = newJArray()
+  var own = newJArray()
+  for unit in sim.board.units:
+    let node = %*{"power": PowerNames[unit.power],
+      "kind": kindLetter(unit.kind),
+      "province": Provinces[unit.province].code}
+    board.add(node)
+    if unit.power == power:
+      own.add(node)
+  var owners = newJArray()
+  for slotIndex, city in Cities:
+    owners.add(%*{"city": Provinces[city].code,
+      "power": (if sim.owner[slotIndex] >= 0:
+        PowerNames[sim.owner[slotIndex]] else: "neutral")})
+  var counts = newJArray()
+  var treasuries = newJArray()
+  let cityCounts = sim.cityCounts()
+  for other in 0 ..< Powers:
+    counts.add(%cityCounts[other])
+    treasuries.add(%sim.treasury[other])
+  var famine = newJArray()
+  for province in sim.famine:
+    famine.add(%Provinces[province].code)
+  var inbox = newJArray()
+  for letter in sim.pressLast & sim.press:
+    if letter.public or letter.toPower == power:
+      inbox.add(%*{"from": PowerNames[letter.fromPower], "text": letter.text,
+        "public": letter.public})
+  %*{
+    "type": "state",
+    "slot": slot,
+    "power": PowerNames[power],
+    "name": sim.names[slot],
+    "year": sim.year,
+    "season": $sim.season,
+    "phase": $sim.phase,
+    "years": sim.config.years,
+    "yearsPlayed": sim.yearsPlayed,
+    "cities": cityCounts[power],
+    "ducats": sim.treasury[power],
+    "units": own,
+    "board": board,
+    "owners": owners,
+    "counts": counts,
+    "treasuries": treasuries,
+    "famine": famine,
+    "plague": (if sim.plagueCity >= 0:
+      Provinces[sim.plagueCity].code else: ""),
+    "paralysed": sim.paralysed[power],
+    "inbox": inbox,
+    "eliminated": sim.eliminated[power],
+    "done": sim.done,
+    "reason": sim.reason
+  }
+
+
 proc tableStateJson*(sim: Sim): JsonNode =
   let counts = sim.cityCounts()
   let units = sim.unitCounts()

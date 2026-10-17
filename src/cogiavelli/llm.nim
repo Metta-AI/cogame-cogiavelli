@@ -22,9 +22,10 @@
 ## certification still completes - this fallback is load-bearing.
 
 import
-  std/[algorithm, json, os, strutils, unicode],
-  bitworld/runtime,
+  std/[algorithm, json, options, os, strutils, unicode],
+  bitworld/[runtime, decision_trajectory],
   curly,
+  prompts,
   sim
 
 const
@@ -650,12 +651,9 @@ proc otherPowersText(power: int): string =
     return parts.join("")
   parts[0 ..< parts.len - 1].join(", ") & " and " & parts[^1]
 
-proc systemPrompt*(sim: Sim, seat: int): string =
+proc systemPrompt*(sim: Sim, seat: int, selection: PromptSelection): string =
   let power = sim.powerOf[seat]
-  "You are " & PowerNames[power] &
-    ", one of six powers contending for Renaissance Italy. The others are\n" &
-    otherPowersText(power) & ", each played by a different cog.\n" &
-    "You never learn who plays them.\n" & """
+  selection.introduction(PowerNames[power], otherPowersText(power)) & """
 Rules:
 - Armies move on land, fleets on seas and along coasts. Every unit has equal strength; a
   unit takes a province only if it out-supports whatever opposes it, and equal strength
@@ -888,6 +886,37 @@ proc parseOrdersReply*(sim: Sim, seat: int, payload: JsonNode): Decision =
       result.builds.add(cleanText(entry.getStr(), MaxBuildLen))
   result.notes = cleanText(payload{"notes"}.getStr(), MaxNotesLen)
 
+proc decisionReply*(decision: Decision, phase: PhaseKind): JsonNode =
+  if phase == phPress:
+    var letters = newJArray()
+    for letter in decision.letters:
+      letters.add(%*{"to": PowerNames[letter.toPower], "text": letter.text})
+    var pledges = newJArray()
+    for pledge in decision.pledges:
+      pledges.add(%*{"kind": $pledge.kind,
+        "to": (if pledge.toPower >= 0: PowerNames[pledge.toPower] else: ""),
+        "province": (if pledge.province >= 0: Provinces[pledge.province].code else: "")})
+    %*{"broadcast": decision.broadcast, "letters": letters,
+      "pledges": pledges, "notes": decision.notes}
+  else:
+    var spend = newJArray()
+    for entry in decision.spend:
+      let target = if entry.targetUnit.len > 0: entry.targetUnit
+        elif entry.targetPower >= 0: PowerNames[entry.targetPower] else: ""
+      spend.add(%*{"action": $entry.kind, "target": target, "amount": entry.amount})
+    %*{"orders": decision.orders, "spend": spend,
+      "builds": decision.builds, "notes": decision.notes}
+
+proc executedReply*(event: GameEvent): JsonNode =
+  ## The engine's accepted submission, including repaired orders and private press.
+  doAssert event.kind in {evPress, evOrders}
+  var decision = Decision(broadcast: event.broadcast, pledges: event.pledges,
+    orders: event.orders, spend: event.entries, builds: event.buildTexts, notes: event.text)
+  for letter in event.letters:
+    if not letter.public:
+      decision.letters.add(letter)
+  decision.decisionReply(if event.kind == evPress: phPress else: phOrders)
+
 # ---- Transport --------------------------------------------------------------
 
 proc requestFor(client: LlmClient, system, user: string, slot: int):
@@ -954,22 +983,37 @@ proc textOf(client: LlmClient, response: Response, error, url: string):
 
 proc decideAll*(
   client: LlmClient,
+  selection: PromptSelection,
   sim: Sim,
   phase: PhaseKind,
   seats: seq[int],
   prompts: seq[string],
-  scripted: seq[ScriptKind]
+  scripted: seq[ScriptKind],
+  evidence: var seq[seq[DecisionAttempt]]
 ): seq[Decision] =
   ## One decision per seat in `seats`, in order, from ONE parallel batch.
   ## Never raises: any failure falls back to the scripted baseline so the
   ## episode always advances. `prompts` and `scripted` are indexed by SEAT.
   result = newSeq[Decision](seats.len)
+  evidence = newSeq[seq[DecisionAttempt]](seats.len)
   var open: seq[int]
   for index, seat in seats:
     let kind = scripted[seat]
     if kind != skNone or client.disabled:
       result[index] = scriptedAction(sim, seat,
         (if kind == skNone: skCondottiere else: kind), phase)
+      var entry = newDecisionAttempt("scripted", "scripted-" &
+        $(if kind == skNone: skCondottiere else: kind),
+        if kind == skNone: aoFallback else: aoTeacher)
+      entry.parsedAction = decisionReply(result[index], phase)
+      entry.accepted = true
+      if kind != skNone:
+        let user = if phase == phPress: pressPrompt(sim, seat, prompts[seat])
+          else: ordersPrompt(sim, seat, prompts[seat])
+        entry.prompt = %*[{"role": "system", "content": systemPrompt(sim, seat, selection)},
+          {"role": "user", "content": user}]
+        entry.response = %($entry.parsedAction)
+      evidence[index].add(entry)
     else:
       open.add(index)
   for attempt in 0 .. 1:
@@ -983,20 +1027,34 @@ proc decideAll*(
         else: ordersPrompt(sim, seat, prompts[seat])
       if attempt > 0:
         user.add(InvalidHint)
-      let request = client.requestFor(systemPrompt(sim, seat), user, seat)
+      let system = systemPrompt(sim, seat, selection)
+      let request = client.requestFor(system, user, seat)
+      var entry = newDecisionAttempt("model-" & $attempt, "model", aoModel)
+      entry.prompt = %*[{"role": "system", "content": system},
+        {"role": "user", "content": user}]
+      entry.request = parseJson(request.body)
+      entry.model = some(if client.transport == ltBedrock:
+        client.bedrockModels[client.bedrockModel] else: client.model)
+      evidence[index].add(entry)
       batch.post(request.url, request.headers, request.body, $index)
     let responses = client.curl.makeRequests(batch, client.timeoutSeconds)
     var stillOpen: seq[int]
     for position, index in open:
       let seat = seats[index]
+      if responses[position].response.body.len > 0:
+        evidence[index][^1].rawResponse = %responses[position].response.body
       try:
         let text = client.textOf(responses[position].response,
           responses[position].error, batch[position].url)
+        evidence[index][^1].response = %text
         let payload = extractJsonObject(text)
         result[index] =
           if phase == phPress: parsePress(sim, seat, payload)
           else: parseOrdersReply(sim, seat, payload)
+        evidence[index][^1].parsedAction = decisionReply(result[index], phase)
+        evidence[index][^1].accepted = true
       except CatchableError as error:
+        evidence[index][^1].rejectionReason = some(error.msg)
         echo "cogiavelli llm: seat ", seat, " attempt ", attempt, " failed: ",
           error.msg
         stillOpen.add(index)
@@ -1005,3 +1063,7 @@ proc decideAll*(
     let seat = seats[index]
     echo "cogiavelli: seat ", seat, " falling back to scripted decision"
     result[index] = scriptedAction(sim, seat, skCondottiere, phase)
+    var entry = newDecisionAttempt("fallback", "scripted-condottiere", aoFallback)
+    entry.parsedAction = decisionReply(result[index], phase)
+    entry.accepted = true
+    evidence[index].add(entry)

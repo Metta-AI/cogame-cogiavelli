@@ -1,3 +1,5 @@
+import bitworld/decision_trajectory
+import cogiavelli/prompts
 ## The episode: season sequencing, ownership, the end conditions, the reply
 ## caps (on rune boundaries), the two name spaces, event JSON round-trips
 ## and the replay.
@@ -40,7 +42,8 @@ proc playOut(config: GameConfig): Sim =
     let seats = sim.pendingSeats()
     check(seats.len > 0, "some seat is always pending until the end")
     let phase = sim.phase
-    let decisions = decideAll(client, sim, phase, seats, prompts, kinds)
+    var evidence: seq[seq[DecisionAttempt]]
+    let decisions = decideAll(client, PromptSelection(), sim, phase, seats, prompts, kinds, evidence)
     for index, seat in seats:
       if sim.done:
         break
@@ -65,7 +68,8 @@ block seasonSequencing:
     order.add(seasonName(sim.season) & "/" & $sim.phase)
     let seats = sim.pendingSeats()
     let phase = sim.phase
-    let decisions = decideAll(client, sim, phase, seats, prompts, kinds)
+    var evidence: seq[seq[DecisionAttempt]]
+    let decisions = decideAll(client, PromptSelection(), sim, phase, seats, prompts, kinds, evidence)
     for index, seat in seats:
       if sim.done:
         break
@@ -126,7 +130,8 @@ block conquestAtTwelve:
   let prompts = newSeq[string](6)
   let kinds = scriptedAll()
   let seats = sim.pendingSeats()
-  let decisions = decideAll(client, sim, sim.phase, seats, prompts, kinds)
+  var evidence: seq[seq[DecisionAttempt]]
+  let decisions = decideAll(client, PromptSelection(), sim, sim.phase, seats, prompts, kinds, evidence)
   for index, seat in seats:
     if sim.done:
       break
@@ -151,7 +156,8 @@ block lastPowerStanding:
   let prompts = newSeq[string](6)
   let kinds = scriptedAll()
   let seats = sim.pendingSeats()
-  let decisions = decideAll(client, sim, sim.phase, seats, prompts, kinds)
+  var evidence: seq[seq[DecisionAttempt]]
+  let decisions = decideAll(client, PromptSelection(), sim, sim.phase, seats, prompts, kinds, evidence)
   for index, seat in seats:
     if sim.done:
       break
@@ -270,7 +276,7 @@ block policyNamesNeverReachAPrompt:
     "Underhill", "Nightjar"]
   var sim = initSim(newConfig(names = names))
   for seat in 0 ..< Seats:
-    let prompts = @[systemPrompt(sim, seat), pressPrompt(sim, seat, ""),
+    let prompts = @[systemPrompt(sim, seat, PromptSelection()), pressPrompt(sim, seat, ""),
       ordersPrompt(sim, seat, "")]
     for prompt in prompts:
       for name in names:

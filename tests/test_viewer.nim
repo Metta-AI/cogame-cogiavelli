@@ -1,3 +1,5 @@
+import bitworld/decision_trajectory
+import cogiavelli/prompts
 ## The viewer contract: the frame carries every key the renderer reads, the
 ## replay bytes are strict UTF-8 JSON, and the appended chrome block
 ## declares no name the copied cogame-babel chrome already declares.
@@ -35,7 +37,8 @@ proc playOut(config: GameConfig): Sim =
     guard.inc
     let seats = sim.pendingSeats()
     let phase = sim.phase
-    let decisions = decideAll(client, sim, phase, seats, prompts, kinds)
+    var evidence: seq[seq[DecisionAttempt]]
+    let decisions = decideAll(client, PromptSelection(), sim, phase, seats, prompts, kinds, evidence)
     for index, seat in seats:
       if sim.done:
         break
