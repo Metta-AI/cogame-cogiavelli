@@ -1,4 +1,3 @@
-import bitworld/decision_trajectory
 import cogiavelli/prompts
 ## The episode: season sequencing, ownership, the end conditions, the reply
 ## caps (on rune boundaries), the two name spaces, event JSON round-trips
@@ -42,8 +41,7 @@ proc playOut(config: GameConfig): Sim =
     let seats = sim.pendingSeats()
     check(seats.len > 0, "some seat is always pending until the end")
     let phase = sim.phase
-    var evidence: seq[seq[DecisionAttempt]]
-    let decisions = decideAll(client, PromptSelection(), sim, phase, seats, prompts, kinds, evidence)
+    let decisions = decideAll(client, PromptSelection(), sim, phase, seats, prompts, kinds)
     for index, seat in seats:
       if sim.done:
         break
@@ -68,8 +66,7 @@ block seasonSequencing:
     order.add(seasonName(sim.season) & "/" & $sim.phase)
     let seats = sim.pendingSeats()
     let phase = sim.phase
-    var evidence: seq[seq[DecisionAttempt]]
-    let decisions = decideAll(client, PromptSelection(), sim, phase, seats, prompts, kinds, evidence)
+    let decisions = decideAll(client, PromptSelection(), sim, phase, seats, prompts, kinds)
     for index, seat in seats:
       if sim.done:
         break
@@ -130,8 +127,7 @@ block conquestAtTwelve:
   let prompts = newSeq[string](6)
   let kinds = scriptedAll()
   let seats = sim.pendingSeats()
-  var evidence: seq[seq[DecisionAttempt]]
-  let decisions = decideAll(client, PromptSelection(), sim, sim.phase, seats, prompts, kinds, evidence)
+  let decisions = decideAll(client, PromptSelection(), sim, sim.phase, seats, prompts, kinds)
   for index, seat in seats:
     if sim.done:
       break
@@ -156,8 +152,7 @@ block lastPowerStanding:
   let prompts = newSeq[string](6)
   let kinds = scriptedAll()
   let seats = sim.pendingSeats()
-  var evidence: seq[seq[DecisionAttempt]]
-  let decisions = decideAll(client, PromptSelection(), sim, sim.phase, seats, prompts, kinds, evidence)
+  let decisions = decideAll(client, PromptSelection(), sim, sim.phase, seats, prompts, kinds)
   for index, seat in seats:
     if sim.done:
       break
