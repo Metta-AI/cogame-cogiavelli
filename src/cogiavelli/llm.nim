@@ -22,8 +22,8 @@
 ## certification still completes - this fallback is load-bearing.
 
 import
-  std/[algorithm, json, options, os, strutils, unicode],
-  bitworld/[runtime, decision_trajectory],
+  std/[algorithm, json, os, strutils, unicode],
+  bitworld/runtime,
   curly,
   prompts,
   sim
@@ -655,15 +655,7 @@ proc systemPrompt*(sim: Sim, seat: int, selection: PromptSelection): string =
   let power = sim.powerOf[seat]
   selection.introduction(PowerNames[power], otherPowersText(power)) & """
 Rules:
-- Armies move on land, fleets on seas and along coasts. Every unit has equal strength; a
-  unit takes a province only if it out-supports whatever opposes it, and equal strength
-  means a STANDOFF and nobody moves. All six powers order at the same time and see
-  nothing of each other's orders until they resolve.
-- Orders: HOLD, MOVE, SUPPORT (a hold or a move) and CONVOY (a fleet at sea carrying an
-  army between coasts). A supported attack that beats the defence DISLODGES the defender,
-  which retreats to the nearest friendly ground or disbands. You may never dislodge your
-  own unit or help anyone dislodge it.
-- Whoever occupies a city owns it, from that moment. Cities pay 3 ducats each every
+""" & selection.warfareBriefing() & """- Whoever occupies a city owns it, from that moment. Cities pay 3 ducats each every
   Winter; every unit costs 1 ducat of upkeep; a new unit costs 3 ducats and appears in a
   vacant city you own.
 - DUCATS ARE THE OTHER ARMY. In the same submission as your orders you may: GIFT ducats
@@ -679,10 +671,7 @@ Rules:
   no unit in it may rebel and be lost.
 - Hold 12 of the 24 cities and you win outright. Otherwise you are scored on your share
   of the 24 cities plus what is left in your treasury. Nothing else scores.
-- LETTERS ARE NOT BINDING. You may promise anything to anyone and then do the opposite.
-  So may they. Only ducats that have actually changed hands are real.
-
-OUTPUT FORMAT: reply with ONLY one JSON object, nothing else — no analysis, no
+""" & selection.diplomacyBriefing() & """OUTPUT FORMAT: reply with ONLY one JSON object, nothing else — no analysis, no
 explanation, no markdown fences, no text before or after the object. Your reply must
 begin with the character { and end with }."""
 
@@ -988,32 +977,18 @@ proc decideAll*(
   phase: PhaseKind,
   seats: seq[int],
   prompts: seq[string],
-  scripted: seq[ScriptKind],
-  evidence: var seq[seq[DecisionAttempt]]
+  scripted: seq[ScriptKind]
 ): seq[Decision] =
   ## One decision per seat in `seats`, in order, from ONE parallel batch.
   ## Never raises: any failure falls back to the scripted baseline so the
   ## episode always advances. `prompts` and `scripted` are indexed by SEAT.
   result = newSeq[Decision](seats.len)
-  evidence = newSeq[seq[DecisionAttempt]](seats.len)
   var open: seq[int]
   for index, seat in seats:
     let kind = scripted[seat]
     if kind != skNone or client.disabled:
       result[index] = scriptedAction(sim, seat,
         (if kind == skNone: skCondottiere else: kind), phase)
-      var entry = newDecisionAttempt("scripted", "scripted-" &
-        $(if kind == skNone: skCondottiere else: kind),
-        if kind == skNone: aoFallback else: aoTeacher)
-      entry.parsedAction = decisionReply(result[index], phase)
-      entry.accepted = true
-      if kind != skNone:
-        let user = if phase == phPress: pressPrompt(sim, seat, prompts[seat])
-          else: ordersPrompt(sim, seat, prompts[seat])
-        entry.prompt = %*[{"role": "system", "content": systemPrompt(sim, seat, selection)},
-          {"role": "user", "content": user}]
-        entry.response = %($entry.parsedAction)
-      evidence[index].add(entry)
     else:
       open.add(index)
   for attempt in 0 .. 1:
@@ -1027,34 +1002,20 @@ proc decideAll*(
         else: ordersPrompt(sim, seat, prompts[seat])
       if attempt > 0:
         user.add(InvalidHint)
-      let system = systemPrompt(sim, seat, selection)
-      let request = client.requestFor(system, user, seat)
-      var entry = newDecisionAttempt("model-" & $attempt, "model", aoModel)
-      entry.prompt = %*[{"role": "system", "content": system},
-        {"role": "user", "content": user}]
-      entry.request = parseJson(request.body)
-      entry.model = some(if client.transport == ltBedrock:
-        client.bedrockModels[client.bedrockModel] else: client.model)
-      evidence[index].add(entry)
+      let request = client.requestFor(systemPrompt(sim, seat, selection), user, seat)
       batch.post(request.url, request.headers, request.body, $index)
     let responses = client.curl.makeRequests(batch, client.timeoutSeconds)
     var stillOpen: seq[int]
     for position, index in open:
       let seat = seats[index]
-      if responses[position].response.body.len > 0:
-        evidence[index][^1].rawResponse = %responses[position].response.body
       try:
         let text = client.textOf(responses[position].response,
           responses[position].error, batch[position].url)
-        evidence[index][^1].response = %text
         let payload = extractJsonObject(text)
         result[index] =
           if phase == phPress: parsePress(sim, seat, payload)
           else: parseOrdersReply(sim, seat, payload)
-        evidence[index][^1].parsedAction = decisionReply(result[index], phase)
-        evidence[index][^1].accepted = true
       except CatchableError as error:
-        evidence[index][^1].rejectionReason = some(error.msg)
         echo "cogiavelli llm: seat ", seat, " attempt ", attempt, " failed: ",
           error.msg
         stillOpen.add(index)
@@ -1063,7 +1024,3 @@ proc decideAll*(
     let seat = seats[index]
     echo "cogiavelli: seat ", seat, " falling back to scripted decision"
     result[index] = scriptedAction(sim, seat, skCondottiere, phase)
-    var entry = newDecisionAttempt("fallback", "scripted-condottiere", aoFallback)
-    entry.parsedAction = decisionReply(result[index], phase)
-    entry.accepted = true
-    evidence[index].add(entry)

@@ -17,49 +17,44 @@ with tempfile.TemporaryDirectory() as directory:
     for variant in ("standard", "gunboat"):
         output = Path(directory) / variant
         subprocess.run(
-            [str(EXPORTER), str(output), "10", variant], cwd=ROOT, check=True
+            [str(EXPORTER), str(output), "10", variant, "mixed", "0"],
+            cwd=ROOT,
+            check=True,
         )
         manifest = json.loads((output / "manifest.json").read_text())
-        source = output / "trajectories.jsonl"
-        episodes, decisions = [], 0
-        assert source.stat().st_mode & 0o777 == 0o600
-        assert not (output / "train.jsonl").exists()
-        assert not (output / "validation.jsonl").exists()
-        with source.open() as stream:
-            for line in stream:
-                row = json.loads(line)
-                assert row["source_revision"] == manifest["source_revision"]
-                if row["event_type"] == "episode":
-                    episodes.append(row)
-                    continue
-                decisions += 1
-                (attempt,) = row["attempts"]
-                assert attempt["origin"] == "teacher"
-                assert "THE BOARD:" in attempt["prompt"][1]["content"]
-                assert "Player1" not in json.dumps(attempt["prompt"])
-                reply = json.loads(attempt["response"])
-                assert reply == attempt["parsed_action"]
-                if "LETTERS" in attempt["prompt"][1]["content"]:
-                    assert set(reply) == {"broadcast", "letters", "pledges", "notes"}
-                else:
-                    assert set(reply) == {"orders", "spend", "builds", "notes"}
-                if row["action_status"] == "accepted":
-                    assert attempt["accepted"] and row["executed_action"] == reply
-                else:
-                    assert (
-                        not attempt["accepted"] and row["selected_attempt_id"] is None
-                    )
-                    assert row["fallback_origin"] == "engine-normalized-submission"
-        assert len(episodes) == len(manifest["runs"]) == 10
-        assert decisions == sum(run["decisions"] for run in manifest["runs"])
-        assert {row["seed_family"] for row in episodes} == {
-            f"cogiavelli-{seed}" for seed in range(1, 11)
-        }
-        assert all(row["status"] == "completed" for row in episodes)
+        train = [
+            json.loads(line)
+            for line in (output / "train.jsonl").read_text().splitlines()
+        ]
+        validation = [
+            json.loads(line)
+            for line in (output / "validation.jsonl").read_text().splitlines()
+        ]
+        assert manifest["variant"] == variant and len(manifest["runs"]) == 10
+        assert [run["prompt_selection"]["variant"] for run in manifest["runs"]] == [
+            "canonical",
+            "plain",
+            "numbered",
+            "questions",
+            "reordered",
+        ] * 2
+        assert {row["seed"] for row in train}.isdisjoint(
+            row["seed"] for row in validation
+        )
+        assert len(train) == manifest["train_examples"]
+        assert len(validation) == manifest["validation_examples"]
         assert all(
             run["reason"] in ("complete", "conquest") and len(run["scores"]) == 6
             for run in manifest["runs"]
         )
+        for row in train + validation:
+            assert "THE BOARD:" in row["prompt"][1]["content"]
+            assert "Player1" not in json.dumps(row["prompt"])
+            reply = json.loads(row["completion"][0]["content"])
+            if "LETTERS" in row["prompt"][1]["content"]:
+                assert set(reply) == {"broadcast", "letters", "pledges", "notes"}
+            else:
+                assert set(reply) == {"orders", "spend", "builds", "notes"}
 
         for teacher in (True, False):
             process = subprocess.Popen(

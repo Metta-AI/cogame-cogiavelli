@@ -1,4 +1,3 @@
-import bitworld/decision_trajectory
 import cogiavelli/prompts
 ## Bounded-orders / legality assertion on the scripted baselines, and the
 ## reply-parsing contract. The baselines are what every failed decision
@@ -38,8 +37,7 @@ proc play(config: GameConfig, kinds: seq[ScriptKind]): Audit =
     guard.inc
     let seats = sim.pendingSeats()
     let phase = sim.phase
-    var evidence: seq[seq[DecisionAttempt]]
-    let decisions = decideAll(client, PromptSelection(), sim, phase, seats, prompts, kinds, evidence)
+    let decisions = decideAll(client, PromptSelection(), sim, phase, seats, prompts, kinds)
     calls.inc
     for index, seat in seats:
       if sim.done:
@@ -173,9 +171,8 @@ block noNetworkWithoutCredentials:
   var kinds: seq[ScriptKind]
   for index in 0 ..< 6:
     kinds.add(skNone)
-  var evidence: seq[seq[DecisionAttempt]]
   let decisions = decideAll(client, PromptSelection(), sim, sim.phase, sim.pendingSeats(),
-    newSeq[string](6), kinds, evidence)
+    newSeq[string](6), kinds)
   check(decisions.len == 6, "six decisions come back")
   for decision in decisions:
     check(decision.scripted, "every one of them is scripted")

@@ -1,78 +1,35 @@
 # Cogiavelli training
 
-The exporter plays complete published matches with six powers. Standard has
-four years and private press; gunboat has six years without press. Teachers
-alternate the shipped `condottiere` and `banker` policies by seat. Every power
-uses the same frozen phase snapshot before orders and expenditure resolve.
+The exporter plays ten complete native matches per certified variant.
+Each decision records the hosted system prompt, the acting power's press
+or orders prompt, and a reply accepted unchanged by the production engine. Six
+powers decide against the same phase snapshot before resolution. Train
+and validation sets split whole matches by seed.
 
 ```sh
 nim c -d:release --path:src -o:/tmp/cogiavelli-posttrain tools/export_posttrain.nim
-/tmp/cogiavelli-posttrain /tmp/cogiavelli-data 10 standard plain 0
+/tmp/cogiavelli-posttrain /tmp/cogiavelli-data 10 standard
 ```
 
-The exporter requires clean committed source and a new output directory.
-`trajectories.jsonl` contains private complete-episode evidence; `manifest.json`
-records source revision, seeds, wordings, years, scores, and decision counts.
-Episodes are written one at a time. Engine-normalized submissions retain the
-original proposal and actual accepted submission separately. A repaired proposal
-cannot become an accepted teacher target. Later economic and military resolution
-is reflected in the episode outcome and replay, not the submitted orders alone.
+The other certified variant is `gunboat`, without the press phase. The
+output contains `train.jsonl`, `validation.jsonl`, and a manifest with
+source revision, seeds, years played, final scores and row counts.
+Proposals normalized by the engine are excluded from teacher targets and
+counted in the manifest. The teacher alternates the shipped `condottiere` and `banker`
+policies by seat.
 
-Convert private events with `coworld.decision_trajectory.read_trajectory_jsonl`
-and `export_complete_episodes` from the shared Metta package. Conversion does not
-authorize training. `metta_training.posttrain.hosted.export_hosted` requires
-external review bound to the complete-episode SHA256 and source revision.
-Select `scripted-condottiere` and `scripted-banker` explicitly. The seed family
-`cogiavelli-SEED` keeps all wordings and both variants in the same data split.
+All 2,490 examples fit 4,096 tokens with the local WordLevel smoke
+tokenizer. One CPU optimizer step reduced four-example validation loss
+from 1.77859 to 1.77401 for standard and 1.70834 to 1.70291 for gunboat.
+This verifies the post-training path, not improved league play.
 
-## Rule wording
-
-`promptVariant` selects `canonical`, `plain`, `numbered`, `questions`, or
-`reordered`. `mixed` uses an explicit nonnegative `promptSeed` to select one
-training wording independently of game randomness. Selection remains fixed for
-all powers, phases, and retries. `heldout-briefing` and `heldout-reference` are
-reserved for evaluation; training resets and teacher exports reject them.
-Only the role and opponent introduction varies. Common rules, legal actions,
-scoring, private observations, operator guidance, and published budgets remain
-unchanged. Canonical wording matches the original numeric bridge.
+From a Metta checkout with the post-training package installed:
 
 ```sh
-/tmp/cogiavelli-train-bridge coworld_manifest_template.json standard --language
-python3 tools/test_prompt_variants.py /tmp/cogiavelli-train-bridge
+uv run --package metta-posttrain --extra train python -m metta_posttrain.train \
+  --dataset /tmp/cogiavelli-data --output /tmp/cogiavelli-adapter \
+  --model Qwen/Qwen3-0.6B --max-steps 100 --max-length 4096
 ```
-
-The language bridge accepts full press or orders JSON through production parsers.
-Its accepted action records the engine-normalized submission, including private
-letter deduplication and illegal-order repair. Terminal outcomes include later
-phase resolution. Private `semantic_view.prompt_template` records the selected
-bank, wording, seed, and exact system/user hashes. Model messages omit metadata.
-
-## Private native evidence
-
-Set `COGAME_SAVE_TRAJECTORY_URI` to a private destination, with
-`COWORLD_EPISODE_ID`, `COWORLD_GAME_VERSION`, and `COWORLD_SOURCE_REVISION`.
-Capture preserves actual request bodies, messages, responses, retries, parsed
-proposals, and engine-accepted submissions. Authorization headers are excluded.
-Failed requests and repaired proposals remain separate from executed fallbacks.
-Explicit scripted policies are teachers. Deadline episodes are marked truncated.
-Private evidence is written before public results announce completion.
-
-```sh
-python3 tools/test_prompt_native_games.py GAME PLAYER OUTPUT SOURCE_REVISION
-```
-
-The panel launches six real player processes for each published variant and
-wording. A closed local endpoint exercises actual failed requests and fallbacks.
-It also runs explicit teachers. Checks compare private observations, request
-hashes, accepted submissions, complete replays, and scores under ordinary budgets.
-This verifies prompt plumbing and deterministic semantics, not model robustness.
-The game-owned transport provides no authenticated serving receipts or token
-probabilities; captured requests alone do not qualify on-policy training data.
-
-Historical CPU pilots used the earlier row exporter. One optimizer step changed
-validation loss from 1.77859 to 1.77401 for standard and 1.70834 to 1.70291 for
-gunboat. Those results do not qualify the new candidate corpus or establish
-improved learning or paraphrase robustness.
 
 ## Numeric reinforcement learning
 
@@ -104,3 +61,26 @@ Reloaded checkpoints on held-out seeds 101 and 102 reported mean scores
 Checkpoint SHA-256 values were
 `3425e3d0a31b14a1f50bb14e48b899eb243a49bf2e9b9f9fd6b53208ff5afc3f`
 and `ceb8d3c020fa12750132143736076f3d6f5fc6a98029390fb7aadebb3177fc51`.
+
+## Prompt fuzzing
+
+The v2 bank varies role, movement and support, simultaneous orders, and nonbinding
+diplomacy explanations. Economic prices, disaster rules, scoring and JSON requirements
+remain exact. Select `canonical`, `plain`, `numbered`, `questions`, or `reordered`
+with `promptVariant`. `mixed` requires a nonnegative `promptSeed` and selects by
+seed modulo five without consuming game randomness. One wording lasts the whole game.
+
+Language bridge resets accept these fields with `--language`. Held-out briefing
+and reference variants require an evaluation split; teacher exports reject them.
+The bridge retains exact private prompt hashes and normalized engine actions.
+
+Append `PROMPT_VARIANT PROMPT_SEED` to export arguments. Mixed export advances the
+prompt seed per game and records each selection. Episode IDs distinguish wordings;
+scenario-family IDs exclude wording and game variant. Keep those families in one
+split. Export from committed source. Original train/validation JSONL files remain
+the dataset interface; no additional hosted capture protocol is introduced.
+
+`tools/test_prompt_variants.py BRIDGE` plays 16 complete games covering both variants,
+seven direct wordings and one mixed selection. Existing training workflows check
+20 mixed exported games and numeric play. Scripted checks establish mechanical
+invariance, not improved learned-policy robustness.

@@ -1,7 +1,7 @@
-## Export complete engine-resolved episodes as private candidate evidence.
-import std/[json, options, os, osproc, strutils]
-import bitworld/decision_trajectory
-import cogiavelli/[sim, llm, prompts]
+## Export full native games with the exact hosted press and orders prompts.
+
+import std/[json, os, osproc, strutils]
+import cogiavelli/[llm, sim, prompts]
 
 when isMainModule:
   let args = commandLineParams()
@@ -10,18 +10,14 @@ when isMainModule:
   let output = args[0]
   let episodes = parseInt(args[1])
   let variant = args[2]
-  let selection = promptSelection(if args.len == 5:
+  let initialSelection = promptSelection(if args.len == 5:
     %*{"promptVariant": args[3], "promptSeed": parseInt(args[4])} else: newJObject())
-  if selection.selectedVariant in {pvHeldoutBriefing, pvHeldoutReference}:
+  if initialSelection.selectedVariant in {pvHeldoutBriefing, pvHeldoutReference}:
     raise newException(ValueError, "held-out prompt variants are evaluation-only")
-  doAssert episodes >= 10
-  doAssert not dirExists(output) and not fileExists(output)
-  let status = execCmdEx("git status --porcelain")
-  doAssert status.exitCode == 0 and status.output.strip().len == 0,
-    "Commit the qualified source before generating a pinned training corpus"
-  let head = execCmdEx("git rev-parse HEAD")
-  doAssert head.exitCode == 0
-  let revision = head.output.strip()
+  doAssert execProcess("git status --porcelain").strip().len == 0, "commit source before export"
+  if episodes < 10: quit("at least ten games are required", 1)
+  if dirExists(output) or fileExists(output):
+    quit("output already exists: " & output, 1)
   let manifest = parseFile("coworld_manifest_template.json")
   var variantConfig = newJNull()
   for entry in manifest["variants"]:
@@ -30,76 +26,91 @@ when isMainModule:
   doAssert variantConfig.kind == JObject
   createDir(output)
   setFilePermissions(output, {fpUserRead, fpUserWrite, fpUserExec})
+  let revision = execProcess("git rev-parse HEAD").strip()
   var
+    trainRows: seq[string]
+    validationRows: seq[string]
     runs = newJArray()
-  writePrivate(output / "trajectories.jsonl", "")
-  let stream = open(output / "trajectories.jsonl", fmAppend)
-  try:
-    for seed in 1 .. episodes:
-      variantConfig["seed"] = %seed
-      var config = defaultGameConfig()
-      config.update($variantConfig)
-      config = sampleEpisode(config)
-      var game = initSim(config)
-      let family = "cogiavelli-" & $seed
-      let episodeId = family & "-" & variant & "-" &
-        $selection.selectedVariant & "-" & $selection.seed
-      let trajectory = newDecisionTrajectory(episodeId, family, "cogiavelli",
-        "source-" & revision, revision)
-      var decisionId = 0
-      while not game.done:
-        let snapshot = game
-        let phase = game.phase
-        let seats = game.pendingSeats()
-        doAssert seats.len > 0
-        for seat in seats:
-          let baseline = if seat mod 2 == 0: skCondottiere else: skBanker
-          let decision = scriptedAction(snapshot, seat, baseline, phase)
-          let reply = decisionReply(decision, phase)
-          let system = systemPrompt(snapshot, seat, selection)
-          let user = if phase == phPress: pressPrompt(snapshot, seat, "")
-            else: ordersPrompt(snapshot, seat, "")
-          let eventIndex = game.events.len
-          if phase == phPress:
-            let parsed = parsePress(snapshot, seat, reply)
-            game.applyPress(seat, parsed.broadcast, parsed.letters,
-              parsed.pledges, parsed.notes, true)
-          else:
-            let parsed = parseOrdersReply(snapshot, seat, reply)
-            game.applyOrders(seat, parsed.orders, parsed.spend,
-              parsed.builds, parsed.notes, true)
-          let executed = executedReply(game.events[eventIndex])
-          var observation = snapshot.observationJson(seat)
-          observation["prompt_template"] = selection.promptMetadata(system, user)
-          var attempt = newDecisionAttempt($decisionId & "-teacher",
-            "scripted-" & $baseline, aoTeacher)
-          attempt.prompt = %*[{"role": "system", "content": system},
-            {"role": "user", "content": user}]
-          attempt.parsedAction = reply
-          attempt.response = %($reply)
-          attempt.accepted = reply == executed
-          if not attempt.accepted:
-            attempt.rejectionReason = some("engine-normalized-submission")
-          trajectory.recordDecision($decisionId, $seat, observation, @[attempt],
-            if attempt.accepted: some(attempt.attemptId) else: none(string),
-            executed, if attempt.accepted: asAccepted else: asFallback, game.done,
-            if attempt.accepted: none(string) else: some("engine-normalized-submission"))
-          inc decisionId
-      doAssert game.reason in ["complete", "conquest"]
-      let results = game.resultsJson()
-      var participants = newJObject()
-      for seat in 0 ..< config.players.len:
-        participants[$seat] = %*{"score": results["scores"][seat]}
-      trajectory.finish(esCompleted, results, participants)
-      stream.write(trajectory.eventsJsonl())
-      runs.add(%*{"seed": seed, "years_played": game.yearsPlayed, "reason": game.reason,
-        "decisions": decisionId, "scores": results["scores"]})
-  finally:
-    stream.close()
-  writePrivate(output / "manifest.json", pretty(%*{
-    "schema_version": 1, "game": "cogiavelli", "variant": variant,
+  for seed in 1 .. episodes:
+    var selection = initialSelection
+    if selection.variant == pvMixed: selection.seed += seed - 1
+    let episode = "cogiavelli-" & variant & "-" & $seed & "-" &
+      $selection.selectedVariant & "-" & $selection.seed
+    variantConfig["seed"] = %seed
+    var config = defaultGameConfig()
+    config.update($variantConfig)
+    var game = initSim(sampleEpisode(config))
+    var rows: seq[string]
+    var normalized = 0
+    while not game.done:
+      let seats = game.pendingSeats()
+      doAssert seats.len > 0
+      let snapshot = game
+      let phase = game.phase
+      for seat in seats:
+        let eventIndex = game.events.len
+        let baseline = if seat mod 2 == 0: skCondottiere else: skBanker
+        let decision = scriptedAction(snapshot, seat, baseline, phase)
+        var reply: JsonNode
+        var user: string
+        if phase == phPress:
+          reply = %*{"broadcast": "", "letters": [], "pledges": [],
+            "notes": ""}
+          user = pressPrompt(snapshot, seat, "")
+          let accepted = parsePress(snapshot, seat, reply)
+          game.applyPress(seat, accepted.broadcast, accepted.letters,
+            accepted.pledges, accepted.notes, true)
+        else:
+          var spend = newJArray()
+          for entry in decision.spend:
+            let target = if entry.targetUnit.len > 0: entry.targetUnit
+              else: PowerNames[entry.targetPower]
+            spend.add(%*{"action": $entry.kind, "target": target,
+              "amount": entry.amount})
+          reply = %*{"orders": decision.orders, "spend": spend,
+            "builds": decision.builds, "notes": ""}
+          user = ordersPrompt(snapshot, seat, "")
+          let accepted = parseOrdersReply(snapshot, seat, reply)
+          doAssert accepted.orders == decision.orders
+          doAssert accepted.spend.len == decision.spend.len
+          doAssert accepted.builds == decision.builds
+          for index, entry in decision.spend:
+            doAssert accepted.spend[index].kind == entry.kind
+            doAssert accepted.spend[index].amount == entry.amount
+            doAssert accepted.spend[index].targetPower == entry.targetPower
+            doAssert accepted.spend[index].targetProvince == entry.targetProvince
+          game.applyOrders(seat, accepted.orders, accepted.spend,
+            accepted.builds, accepted.notes, true)
+        if executedReply(game.events[eventIndex]) != reply:
+          inc normalized
+          continue
+        rows.add($(%*{
+          "episode_id": episode,
+          "seed": "cogiavelli-" & $seed,
+          "decision_id": rows.len,
+          "prompt": [
+            {"role": "system", "content": systemPrompt(snapshot, seat, selection)},
+            {"role": "user", "content": user}
+          ],
+          "completion": [{"role": "assistant", "content": $reply}],
+          "game": "cogiavelli",
+          "action_schema_revision": "cogiavelli-press-orders-v1"
+        }))
+    doAssert game.reason in ["complete", "conquest"]
+    if seed mod 5 == 0: validationRows.add(rows)
+    else: trainRows.add(rows)
+    runs.add(%*{"seed": seed, "episode": episode, "years_played": game.yearsPlayed,
+      "prompt_selection": selection.selectionMetadata(),
+      "normalized_proposals": normalized,
+      "reason": game.reason, "decisions": rows.len,
+      "scores": resultsJson(game)["scores"]})
+  writeFile(output / "train.jsonl", trainRows.join("\n") & "\n")
+  writeFile(output / "validation.jsonl", validationRows.join("\n") & "\n")
+  writeFile(output / "manifest.json", pretty(%*{
+    "schema_version": 1,
+    "prompt_selection": initialSelection.selectionMetadata(), "game": "cogiavelli", "variant": variant,
     "source_revision": revision, "teacher": "condottiere-vs-banker",
-    "prompt_selection": selection.selectionMetadata(),
-    "split_authority": "shared Coworld SDK and application importer by seed_family",
-    "runs": runs}) & "\n")
-  echo "complete games=", episodes
+    "train_examples": trainRows.len,
+    "validation_examples": validationRows.len, "runs": runs
+  }) & "\n")
+  echo "train=", trainRows.len, " validation=", validationRows.len
