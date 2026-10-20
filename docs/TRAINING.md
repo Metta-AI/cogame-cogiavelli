@@ -75,7 +75,8 @@ and reference variants require an evaluation split; teacher exports reject them.
 The bridge retains exact private prompt hashes and normalized engine actions.
 
 Append `PROMPT_VARIANT PROMPT_SEED` to export arguments. Mixed export advances the
-prompt seed per game and records each selection. Episode IDs distinguish wordings;
+prompt seed separately within each split and records each selection. This keeps
+all five wordings available in training despite every-fifth-seed validation. Episode IDs distinguish wordings;
 scenario-family IDs exclude wording and game variant. Keep those families in one
 split. Export from committed source. Original train/validation JSONL files remain
 the dataset interface; no additional hosted capture protocol is introduced.
