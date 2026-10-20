@@ -28,6 +28,7 @@ import
   mummy,
   mummy/routers,
   llm,
+  prompts,
   sim
 
 const
@@ -44,6 +45,7 @@ const
 type
   GameState = object
     config: GameConfig
+    selection: PromptSelection
     sim: Sim
     prompts: seq[string]
     scripted: seq[ScriptKind]
@@ -100,65 +102,8 @@ proc snapshotJson(gs: GameState): JsonNode =
   result["connected"] = connected
 
 proc playerStateJson(gs: GameState, slot: int): JsonNode =
-  ## The whole public board, the public city table and every treasury —
-  ## plus this seat's own units and inbox, and nothing of any other power's
-  ## pending orders, pending expenditure, private letters or notes.
-  let power = gs.sim.powerOf[slot]
-  var board = newJArray()
-  var own = newJArray()
-  for unit in gs.sim.board.units:
-    let node = %*{"power": PowerNames[unit.power],
-      "kind": kindLetter(unit.kind),
-      "province": Provinces[unit.province].code}
-    board.add(node)
-    if unit.power == power:
-      own.add(node)
-  var owners = newJArray()
-  for slotIndex, city in Cities:
-    owners.add(%*{"city": Provinces[city].code,
-      "power": (if gs.sim.owner[slotIndex] >= 0:
-        PowerNames[gs.sim.owner[slotIndex]] else: "neutral")})
-  var counts = newJArray()
-  var treasuries = newJArray()
-  let cityCounts = gs.sim.cityCounts()
-  for other in 0 ..< Powers:
-    counts.add(%cityCounts[other])
-    treasuries.add(%gs.sim.treasury[other])
-  var famine = newJArray()
-  for province in gs.sim.famine:
-    famine.add(%Provinces[province].code)
-  var inbox = newJArray()
-  for letter in gs.sim.pressLast & gs.sim.press:
-    if letter.public or letter.toPower == power:
-      inbox.add(%*{"from": PowerNames[letter.fromPower], "text": letter.text,
-        "public": letter.public})
-  %*{
-    "type": "state",
-    "slot": slot,
-    "power": PowerNames[power],
-    "name": gs.sim.names[slot],
-    "year": gs.sim.year,
-    "season": $gs.sim.season,
-    "phase": $gs.sim.phase,
-    "years": gs.config.years,
-    "yearsPlayed": gs.sim.yearsPlayed,
-    "cities": cityCounts[power],
-    "ducats": gs.sim.treasury[power],
-    "units": own,
-    "board": board,
-    "owners": owners,
-    "counts": counts,
-    "treasuries": treasuries,
-    "famine": famine,
-    "plague": (if gs.sim.plagueCity >= 0:
-      Provinces[gs.sim.plagueCity].code else: ""),
-    "paralysed": gs.sim.paralysed[power],
-    "inbox": inbox,
-    "eliminated": gs.sim.eliminated[power],
-    "started": gs.started,
-    "done": gs.sim.done,
-    "reason": gs.sim.reason
-  }
+  result = gs.sim.observationJson(slot)
+  result["started"] = %gs.started
 
 proc broadcastLocked(gs: GameState) =
   ## Callers hold stateLock. Spectators get the whole table; players get
@@ -339,7 +284,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       ## The slow part (one batch for every open seat at once) runs outside
       ## the lock on a snapshot; only this thread mutates the sim, so the
       ## snapshot cannot go stale.
-      let decisions = decideAll(client, simCopy, phase, seats, prompts, kinds)
+      let decisions = decideAll(client, state.selection, simCopy, phase, seats, prompts, kinds)
 
       withLock stateLock:
         echo "cogiavelli: ", phaseLabel(state.sim), " — ", seats.len,
@@ -570,6 +515,8 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   if config.tokens.len != config.players.len:
     raise newException(CogiavelliError, "tokens and players must align")
   state.config = config
+  state.selection = promptSelection(parseJson(
+    if runtimeConfig.config.len > 0: runtimeConfig.config else: "{}"))
   state.sim = initSim(config)
   state.prompts = newSeq[string](config.players.len)
   state.scripted = newSeq[ScriptKind](config.players.len)

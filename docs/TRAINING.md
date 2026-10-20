@@ -2,7 +2,7 @@
 
 The exporter plays ten complete native matches per certified variant.
 Each decision records the hosted system prompt, the acting power's press
-or orders prompt, and a reply accepted by the production parser. Six
+or orders prompt, and a reply accepted unchanged by the production engine. Six
 powers decide against the same phase snapshot before resolution. Train
 and validation sets split whole matches by seed.
 
@@ -13,9 +13,9 @@ nim c -d:release --path:src -o:/tmp/cogiavelli-posttrain tools/export_posttrain.
 
 The other certified variant is `gunboat`, without the press phase. The
 output contains `train.jsonl`, `validation.jsonl`, and a manifest with
-source revision, seeds, years played, final scores, and row counts. Ten
-matches yielded 1,146/282 standard and 855/207 gunboat train/validation
-decisions. The teacher alternates the shipped `condottiere` and `banker`
+source revision, seeds, years played, final scores and row counts.
+Proposals normalized by the engine are excluded from teacher targets and
+counted in the manifest. The teacher alternates the shipped `condottiere` and `banker`
 policies by seat.
 
 All 2,490 examples fit 4,096 tokens with the local WordLevel smoke
@@ -23,13 +23,9 @@ tokenizer. One CPU optimizer step reduced four-example validation loss
 from 1.77859 to 1.77401 for standard and 1.70834 to 1.70291 for gunboat.
 This verifies the post-training path, not improved league play.
 
-From a Metta checkout with the post-training package installed:
+Use the [post-training research package](https://github.com/Metta-AI/posttraining-research/tree/main/packages/metta-posttraining)
+for current training and adapter-packaging workflows.
 
-```sh
-uv run --package metta-posttrain --extra train python -m metta_posttrain.train \
-  --dataset /tmp/cogiavelli-data --output /tmp/cogiavelli-adapter \
-  --model Qwen/Qwen3-0.6B --max-steps 100 --max-length 4096
-```
 
 ## Numeric reinforcement learning
 
@@ -61,3 +57,30 @@ Reloaded checkpoints on held-out seeds 101 and 102 reported mean scores
 Checkpoint SHA-256 values were
 `3425e3d0a31b14a1f50bb14e48b899eb243a49bf2e9b9f9fd6b53208ff5afc3f`
 and `ceb8d3c020fa12750132143736076f3d6f5fc6a98029390fb7aadebb3177fc51`.
+
+## Prompt fuzzing
+
+The v2 bank varies role, movement and support, simultaneous orders, and nonbinding
+diplomacy explanations. Economic prices, disaster rules, scoring and JSON requirements
+remain exact. Select `canonical`, `plain`, `numbered`, `questions`, or `reordered`
+with `promptVariant`. `mixed` requires a nonnegative `promptSeed` and selects by
+seed modulo five without consuming game randomness. One wording lasts the whole game.
+
+Language bridge resets accept these fields with `--language`. Held-out briefing
+and reference variants require an evaluation split; teacher exports reject them.
+The bridge retains exact private prompt hashes and normalized engine actions.
+
+Append `PROMPT_VARIANT PROMPT_SEED` to export arguments. Mixed export advances the
+prompt seed separately within each split and records each selection. This keeps
+all five wordings available in training despite every-fifth-seed validation. Episode IDs distinguish wordings;
+scenario-family IDs exclude wording and game variant. Keep those families in one
+split. Export from committed source. Original train/validation JSONL files remain
+the dataset interface; no additional hosted capture protocol is introduced.
+
+`tools/test_prompt_variants.py BRIDGE` plays 16 complete games covering both variants,
+seven direct wordings and one mixed selection. Existing training workflows check
+20 mixed exported games and numeric play. Scripted checks establish mechanical
+invariance, not improved learned-policy robustness.
+
+Episode IDs include requested selection, resolved wording, and prompt seed, so
+matched explicit and mixed collections remain distinct. Scenario families stay unchanged.

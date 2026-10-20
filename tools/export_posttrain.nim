@@ -1,15 +1,20 @@
 ## Export full native games with the exact hosted press and orders prompts.
 
 import std/[json, os, osproc, strutils]
-import cogiavelli/[llm, sim]
+import cogiavelli/[llm, sim, prompts]
 
 when isMainModule:
   let args = commandLineParams()
-  if args.len != 3:
-    quit("usage: cogiavelli-posttrain OUTPUT EPISODES VARIANT", 1)
+  if args.len notin [3, 5]:
+    quit("usage: cogiavelli-posttrain OUTPUT EPISODES VARIANT [PROMPT_VARIANT PROMPT_SEED]", 1)
   let output = args[0]
   let episodes = parseInt(args[1])
   let variant = args[2]
+  let initialSelection = promptSelection(if args.len == 5:
+    %*{"promptVariant": args[3], "promptSeed": parseInt(args[4])} else: newJObject())
+  if initialSelection.selectedVariant in {pvHeldoutBriefing, pvHeldoutReference}:
+    raise newException(ValueError, "held-out prompt variants are evaluation-only")
+  doAssert execProcess("git status --porcelain").strip().len == 0, "commit source before export"
   if episodes < 10: quit("at least ten games are required", 1)
   if dirExists(output) or fileExists(output):
     quit("output already exists: " & output, 1)
@@ -20,23 +25,34 @@ when isMainModule:
       variantConfig = copy(entry["game_config"])
   doAssert variantConfig.kind == JObject
   createDir(output)
+  setFilePermissions(output, {fpUserRead, fpUserWrite, fpUserExec})
   let revision = execProcess("git rev-parse HEAD").strip()
   var
     trainRows: seq[string]
     validationRows: seq[string]
     runs = newJArray()
+    wordingCounts: array[2, int]
   for seed in 1 .. episodes:
+    var selection = initialSelection
+    let partition = ord(seed mod 5 == 0)
+    if selection.variant == pvMixed:
+      selection.seed += wordingCounts[partition]
+    inc wordingCounts[partition]
+    let episode = "cogiavelli-" & variant & "-" & $seed & "-" &
+      $selection.variant & "-" & $selection.selectedVariant & "-" & $selection.seed
     variantConfig["seed"] = %seed
     var config = defaultGameConfig()
     config.update($variantConfig)
     var game = initSim(sampleEpisode(config))
     var rows: seq[string]
+    var normalized = 0
     while not game.done:
       let seats = game.pendingSeats()
       doAssert seats.len > 0
       let snapshot = game
       let phase = game.phase
       for seat in seats:
+        let eventIndex = game.events.len
         let baseline = if seat mod 2 == 0: skCondottiere else: skBanker
         let decision = scriptedAction(snapshot, seat, baseline, phase)
         var reply: JsonNode
@@ -69,12 +85,15 @@ when isMainModule:
             doAssert accepted.spend[index].targetProvince == entry.targetProvince
           game.applyOrders(seat, accepted.orders, accepted.spend,
             accepted.builds, accepted.notes, true)
+        if executedReply(game.events[eventIndex]) != reply:
+          inc normalized
+          continue
         rows.add($(%*{
-          "episode_id": "cogiavelli-" & variant & "-" & $seed,
-          "seed": "cogiavelli-" & variant & "-" & $seed,
+          "episode_id": episode,
+          "seed": "cogiavelli-" & $seed,
           "decision_id": rows.len,
           "prompt": [
-            {"role": "system", "content": systemPrompt(snapshot, seat)},
+            {"role": "system", "content": systemPrompt(snapshot, seat, selection)},
             {"role": "user", "content": user}
           ],
           "completion": [{"role": "assistant", "content": $reply}],
@@ -84,13 +103,16 @@ when isMainModule:
     doAssert game.reason in ["complete", "conquest"]
     if seed mod 5 == 0: validationRows.add(rows)
     else: trainRows.add(rows)
-    runs.add(%*{"seed": seed, "years_played": game.yearsPlayed,
+    runs.add(%*{"seed": seed, "episode": episode, "years_played": game.yearsPlayed,
+      "prompt_selection": selection.selectionMetadata(),
+      "normalized_proposals": normalized,
       "reason": game.reason, "decisions": rows.len,
       "scores": resultsJson(game)["scores"]})
   writeFile(output / "train.jsonl", trainRows.join("\n") & "\n")
   writeFile(output / "validation.jsonl", validationRows.join("\n") & "\n")
   writeFile(output / "manifest.json", pretty(%*{
-    "schema_version": 1, "game": "cogiavelli", "variant": variant,
+    "schema_version": 1,
+    "prompt_selection": initialSelection.selectionMetadata(), "game": "cogiavelli", "variant": variant,
     "source_revision": revision, "teacher": "condottiere-vs-banker",
     "train_examples": trainRows.len,
     "validation_examples": validationRows.len, "runs": runs

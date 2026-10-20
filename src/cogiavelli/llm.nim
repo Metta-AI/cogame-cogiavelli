@@ -25,6 +25,7 @@ import
   std/[algorithm, json, os, strutils, unicode],
   bitworld/runtime,
   curly,
+  prompts,
   sim
 
 const
@@ -650,22 +651,11 @@ proc otherPowersText(power: int): string =
     return parts.join("")
   parts[0 ..< parts.len - 1].join(", ") & " and " & parts[^1]
 
-proc systemPrompt*(sim: Sim, seat: int): string =
+proc systemPrompt*(sim: Sim, seat: int, selection: PromptSelection): string =
   let power = sim.powerOf[seat]
-  "You are " & PowerNames[power] &
-    ", one of six powers contending for Renaissance Italy. The others are\n" &
-    otherPowersText(power) & ", each played by a different cog.\n" &
-    "You never learn who plays them.\n" & """
+  selection.introduction(PowerNames[power], otherPowersText(power)) & """
 Rules:
-- Armies move on land, fleets on seas and along coasts. Every unit has equal strength; a
-  unit takes a province only if it out-supports whatever opposes it, and equal strength
-  means a STANDOFF and nobody moves. All six powers order at the same time and see
-  nothing of each other's orders until they resolve.
-- Orders: HOLD, MOVE, SUPPORT (a hold or a move) and CONVOY (a fleet at sea carrying an
-  army between coasts). A supported attack that beats the defence DISLODGES the defender,
-  which retreats to the nearest friendly ground or disbands. You may never dislodge your
-  own unit or help anyone dislodge it.
-- Whoever occupies a city owns it, from that moment. Cities pay 3 ducats each every
+""" & selection.warfareBriefing() & """- Whoever occupies a city owns it, from that moment. Cities pay 3 ducats each every
   Winter; every unit costs 1 ducat of upkeep; a new unit costs 3 ducats and appears in a
   vacant city you own.
 - DUCATS ARE THE OTHER ARMY. In the same submission as your orders you may: GIFT ducats
@@ -681,10 +671,7 @@ Rules:
   no unit in it may rebel and be lost.
 - Hold 12 of the 24 cities and you win outright. Otherwise you are scored on your share
   of the 24 cities plus what is left in your treasury. Nothing else scores.
-- LETTERS ARE NOT BINDING. You may promise anything to anyone and then do the opposite.
-  So may they. Only ducats that have actually changed hands are real.
-
-OUTPUT FORMAT: reply with ONLY one JSON object, nothing else — no analysis, no
+""" & selection.diplomacyBriefing() & """OUTPUT FORMAT: reply with ONLY one JSON object, nothing else — no analysis, no
 explanation, no markdown fences, no text before or after the object. Your reply must
 begin with the character { and end with }."""
 
@@ -888,6 +875,37 @@ proc parseOrdersReply*(sim: Sim, seat: int, payload: JsonNode): Decision =
       result.builds.add(cleanText(entry.getStr(), MaxBuildLen))
   result.notes = cleanText(payload{"notes"}.getStr(), MaxNotesLen)
 
+proc decisionReply*(decision: Decision, phase: PhaseKind): JsonNode =
+  if phase == phPress:
+    var letters = newJArray()
+    for letter in decision.letters:
+      letters.add(%*{"to": PowerNames[letter.toPower], "text": letter.text})
+    var pledges = newJArray()
+    for pledge in decision.pledges:
+      pledges.add(%*{"kind": $pledge.kind,
+        "to": (if pledge.toPower >= 0: PowerNames[pledge.toPower] else: ""),
+        "province": (if pledge.province >= 0: Provinces[pledge.province].code else: "")})
+    %*{"broadcast": decision.broadcast, "letters": letters,
+      "pledges": pledges, "notes": decision.notes}
+  else:
+    var spend = newJArray()
+    for entry in decision.spend:
+      let target = if entry.targetUnit.len > 0: entry.targetUnit
+        elif entry.targetPower >= 0: PowerNames[entry.targetPower] else: ""
+      spend.add(%*{"action": $entry.kind, "target": target, "amount": entry.amount})
+    %*{"orders": decision.orders, "spend": spend,
+      "builds": decision.builds, "notes": decision.notes}
+
+proc executedReply*(event: GameEvent): JsonNode =
+  ## The engine's accepted submission, including repaired orders and private press.
+  doAssert event.kind in {evPress, evOrders}
+  var decision = Decision(broadcast: event.broadcast, pledges: event.pledges,
+    orders: event.orders, spend: event.entries, builds: event.buildTexts, notes: event.text)
+  for letter in event.letters:
+    if not letter.public:
+      decision.letters.add(letter)
+  decision.decisionReply(if event.kind == evPress: phPress else: phOrders)
+
 # ---- Transport --------------------------------------------------------------
 
 proc requestFor(client: LlmClient, system, user: string, slot: int):
@@ -954,6 +972,7 @@ proc textOf(client: LlmClient, response: Response, error, url: string):
 
 proc decideAll*(
   client: LlmClient,
+  selection: PromptSelection,
   sim: Sim,
   phase: PhaseKind,
   seats: seq[int],
@@ -983,7 +1002,7 @@ proc decideAll*(
         else: ordersPrompt(sim, seat, prompts[seat])
       if attempt > 0:
         user.add(InvalidHint)
-      let request = client.requestFor(systemPrompt(sim, seat), user, seat)
+      let request = client.requestFor(systemPrompt(sim, seat, selection), user, seat)
       batch.post(request.url, request.headers, request.body, $index)
     let responses = client.curl.makeRequests(batch, client.timeoutSeconds)
     var stillOpen: seq[int]

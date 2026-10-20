@@ -158,6 +158,9 @@ jobs:
           python3 tools/test_training.py /tmp/cogiavelli-posttrain \
             /tmp/cogiavelli-train-bridge
 
+      - name: Check complete prompt variants
+        run: python3 tools/test_prompt_variants.py /tmp/cogiavelli-train-bridge
+
       - name: Sweep the scripted baselines' parameter grid
         # Acceptance checklist item 7: "the baseline's parameters were tuned
         # with a grid harness, not guessed". tools/tune_baseline.nim sweeps

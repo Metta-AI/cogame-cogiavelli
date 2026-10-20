@@ -16,15 +16,41 @@ BRIDGE = Path(sys.argv[2]).resolve()
 with tempfile.TemporaryDirectory() as directory:
     for variant in ("standard", "gunboat"):
         output = Path(directory) / variant
-        subprocess.run([str(EXPORTER), str(output), "10", variant], cwd=ROOT, check=True)
+        subprocess.run(
+            [str(EXPORTER), str(output), "10", variant, "mixed", "0"],
+            cwd=ROOT,
+            check=True,
+        )
         manifest = json.loads((output / "manifest.json").read_text())
-        train = [json.loads(line) for line in (output / "train.jsonl").read_text().splitlines()]
-        validation = [json.loads(line) for line in (output / "validation.jsonl").read_text().splitlines()]
+        train = [
+            json.loads(line)
+            for line in (output / "train.jsonl").read_text().splitlines()
+        ]
+        validation = [
+            json.loads(line)
+            for line in (output / "validation.jsonl").read_text().splitlines()
+        ]
         assert manifest["variant"] == variant and len(manifest["runs"]) == 10
+        wordings = {
+            run["episode"]: run["prompt_selection"]["variant"]
+            for run in manifest["runs"]
+        }
+        assert {wordings[row["episode_id"]] for row in train} == {
+            "canonical",
+            "plain",
+            "numbered",
+            "questions",
+            "reordered",
+        }
+        assert {row["seed"] for row in train}.isdisjoint(
+            row["seed"] for row in validation
+        )
         assert len(train) == manifest["train_examples"]
         assert len(validation) == manifest["validation_examples"]
-        assert all(run["reason"] in ("complete", "conquest") and
-                   len(run["scores"]) == 6 for run in manifest["runs"])
+        assert all(
+            run["reason"] in ("complete", "conquest") and len(run["scores"]) == 6
+            for run in manifest["runs"]
+        )
         for row in train + validation:
             assert "THE BOARD:" in row["prompt"][1]["content"]
             assert "Player1" not in json.dumps(row["prompt"])
@@ -36,8 +62,12 @@ with tempfile.TemporaryDirectory() as directory:
 
         for teacher in (True, False):
             process = subprocess.Popen(
-                [str(BRIDGE), str(MANIFEST), variant], stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE, text=True, bufsize=1, cwd="/tmp",
+                [str(BRIDGE), str(MANIFEST), variant],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                cwd="/tmp",
             )
             assert process.stdin is not None and process.stdout is not None
             rng = random.Random(13)
@@ -48,8 +78,13 @@ with tempfile.TemporaryDirectory() as directory:
                 return json.loads(process.stdout.readline())
 
             try:
-                observation = request({"kind": "reset", "players": 6,
-                                       "seed": f"cogiavelli-{variant}-{teacher}"})
+                observation = request(
+                    {
+                        "kind": "reset",
+                        "players": 6,
+                        "seed": f"cogiavelli-{variant}-{teacher}",
+                    }
+                )
                 decisions = 0
                 while observation["kind"] == "decision":
                     assert observation["seat"] in range(6)
@@ -58,10 +93,18 @@ with tempfile.TemporaryDirectory() as directory:
                     encoded = request({"kind": "encode"})
                     assert len(encoded["values"]) == 531
                     assert encoded["actions"] == [{"choice": 0}, {"choice": 1}]
-                    action = (json.loads(request({"kind": "teacher"})["response"])
-                              if teacher else rng.choice(encoded["actions"]))
-                    accepted = request({"kind": "step", "decision_id": decisions,
-                                        "response": json.dumps(action)})
+                    action = (
+                        json.loads(request({"kind": "teacher"})["response"])
+                        if teacher
+                        else rng.choice(encoded["actions"])
+                    )
+                    accepted = request(
+                        {
+                            "kind": "step",
+                            "decision_id": decisions,
+                            "response": json.dumps(action),
+                        }
+                    )
                     assert accepted["kind"] == "accepted"
                     observation = accepted["observation"]
                     decisions += 1

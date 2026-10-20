@@ -1,3 +1,4 @@
+import cogiavelli/prompts
 ## Bounded-orders / legality assertion on the scripted baselines, and the
 ## reply-parsing contract. The baselines are what every failed decision
 ## falls back to, so "always legal, always affordable, always terminates"
@@ -36,7 +37,7 @@ proc play(config: GameConfig, kinds: seq[ScriptKind]): Audit =
     guard.inc
     let seats = sim.pendingSeats()
     let phase = sim.phase
-    let decisions = decideAll(client, sim, phase, seats, prompts, kinds)
+    let decisions = decideAll(client, PromptSelection(), sim, phase, seats, prompts, kinds)
     calls.inc
     for index, seat in seats:
       if sim.done:
@@ -170,7 +171,7 @@ block noNetworkWithoutCredentials:
   var kinds: seq[ScriptKind]
   for index in 0 ..< 6:
     kinds.add(skNone)
-  let decisions = decideAll(client, sim, sim.phase, sim.pendingSeats(),
+  let decisions = decideAll(client, PromptSelection(), sim, sim.phase, sim.pendingSeats(),
     newSeq[string](6), kinds)
   check(decisions.len == 6, "six decisions come back")
   for decision in decisions:
