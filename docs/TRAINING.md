@@ -23,13 +23,9 @@ tokenizer. One CPU optimizer step reduced four-example validation loss
 from 1.77859 to 1.77401 for standard and 1.70834 to 1.70291 for gunboat.
 This verifies the post-training path, not improved league play.
 
-From a Metta checkout with the post-training package installed:
+Use the [post-training research package](https://github.com/Metta-AI/posttraining-research/tree/main/packages/metta-posttraining)
+for current training and adapter-packaging workflows.
 
-```sh
-uv run --package metta-posttrain --extra train python -m metta_posttrain.train \
-  --dataset /tmp/cogiavelli-data --output /tmp/cogiavelli-adapter \
-  --model Qwen/Qwen3-0.6B --max-steps 100 --max-length 4096
-```
 
 ## Numeric reinforcement learning
 
@@ -85,3 +81,6 @@ the dataset interface; no additional hosted capture protocol is introduced.
 seven direct wordings and one mixed selection. Existing training workflows check
 20 mixed exported games and numeric play. Scripted checks establish mechanical
 invariance, not improved learned-policy robustness.
+
+Episode IDs include requested selection, resolved wording, and prompt seed, so
+matched explicit and mixed collections remain distinct. Scenario families stay unchanged.
