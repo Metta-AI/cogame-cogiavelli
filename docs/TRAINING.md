@@ -1,5 +1,36 @@
 # Cogiavelli training
 
+## Authentic hosted model traces
+
+The scripted exporter below remains a mechanics smoke test. For real model data,
+set `COGAME_SAVE_TRAJECTORY_URI` on the ordinary game server. The opt-in private
+JSONL artifact records every native press/orders request and returned response,
+platform call ID, actual applied action, and retry/fallback/normalization status.
+Requests still run as one parallel batch per phase, with the existing retry and
+fallback behavior. All private observations are frozen before any seat applies.
+
+Only unmodified model actions can be selected. Optional omitted JSON fields
+receive their native empty defaults for the equality check; the stored response
+is unchanged. Parser repairs and engine repairs are excluded. Scripted or
+credential-free baseline decisions remain unknown-origin and cannot become model
+teaching targets. Missing provider usage remains unknown. Authenticate platform
+receipts with the maintained research collector before training; a local trace
+alone is not model provenance. Scenario families group the native seed across
+variants and wording, preserving the existing whole-scenario split convention.
+
+To check the complete production server/player path locally, compile
+`src/cogiavelli.nim` and `src/cogiavelli_player.nim`, then run:
+
+```sh
+python3 tools/test_native_capture.py bin/cogiavelli bin/cogiavelli-player tmp/native-capture
+```
+
+This retains six complete standard/gunboat games: capture on/off replay and
+outcome parity, retries, fallback, parser/engine normalization, privacy, missing
+usage, and offline fallback. The synthetic provider is system-test evidence,
+not an authentic model teacher. Hosted real-model receipt admission and Qwen
+training qualification must be measured separately.
+
 The exporter plays ten complete native matches per certified variant.
 Each decision records the hosted system prompt, the acting power's press
 or orders prompt, and a reply accepted unchanged by the production engine. Six
@@ -75,7 +106,7 @@ prompt seed separately within each split and records each selection. This keeps
 all five wordings available in training despite every-fifth-seed validation. Episode IDs distinguish wordings;
 scenario-family IDs exclude wording and game variant. Keep those families in one
 split. Export from committed source. Original train/validation JSONL files remain
-the dataset interface; no additional hosted capture protocol is introduced.
+the dataset interface; the opt-in hosted evidence above does not change the game action protocol.
 
 `tools/test_prompt_variants.py BRIDGE` plays 16 complete games covering both variants,
 seven direct wordings and one mixed selection. Existing training workflows check

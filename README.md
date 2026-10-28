@@ -61,6 +61,10 @@ scripted — and **every** seat when no LLM credentials are available, so episod
 * `PLAYER_SCRIPTED=banker` — the wall with a vault. Every unit holds, four ducats of loyalty on each
   garrison, never attacks, never bribes, ends rich, small and un-bribable.
 
+The opt-in private native capture path records real model requests and applied
+actions without changing the simultaneous game loop. See [training](docs/TRAINING.md)
+for receipt admission requirements and the complete server/player parity test.
+
 ## Two name spaces
 
 In game a seat is **only ever a power name** — `VENICE` — plus an anonymous cog alias. Prompts,

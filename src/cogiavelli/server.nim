@@ -29,7 +29,8 @@ import
   mummy/routers,
   llm,
   prompts,
-  sim
+  sim,
+  training
 
 const
   MaxPromptLen = 4000
@@ -47,6 +48,7 @@ type
     config: GameConfig
     selection: PromptSelection
     sim: Sim
+    trajectory: DecisionTrajectory
     prompts: seq[string]
     scripted: seq[ScriptKind]
     playerSockets: Table[int, WebSocket]
@@ -165,6 +167,7 @@ proc finishEpisode(runtimeConfig: RuntimeConfig) =
       return
     state.finished = true
     results = state.sim.resultsJson()
+    state.trajectory.finishNativeTrajectory(results)
     replayData = state.replayPayload(results)
 
     ## Send final frames to players BEFORE writing artifacts: the hosted
@@ -284,6 +287,9 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       ## The slow part (one batch for every open seat at once) runs outside
       ## the lock on a snapshot; only this thread mutates the sim, so the
       ## snapshot cannot go stale.
+      var captureViews: seq[JsonNode]
+      if not state.trajectory.isNil:
+        for seat in seats: captureViews.add(simCopy.observationJson(seat))
       let decisions = decideAll(client, state.selection, simCopy, phase, seats, prompts, kinds)
 
       withLock stateLock:
@@ -293,6 +299,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           if state.sim.done or not state.sim.pending[seat]:
             continue
           let decision = decisions[index]
+          let eventIndex = state.sim.events.len
           try:
             if phase == phPress:
               state.sim.applyPress(seat, decision.broadcast, decision.letters,
@@ -310,6 +317,12 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
             else:
               state.sim.applyOrders(seat, fallback.orders, fallback.spend,
                 fallback.builds, "", true)
+          if not state.trajectory.isNil:
+            let applied = state.sim.events[eventIndex]
+            state.trajectory.recordAppliedDecision(eventIndex, seat,
+              config.players[seat].name, captureViews[index], applied.executedReply(),
+              applied.scripted, kinds[seat] != skNone, client.nativeAttempts[seat],
+              state.selection)
         state.broadcastLocked()
 
       if config.turnDelayMs > 0:
@@ -518,6 +531,7 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   state.selection = promptSelection(parseJson(
     if runtimeConfig.config.len > 0: runtimeConfig.config else: "{}"))
   state.sim = initSim(config)
+  state.trajectory = initNativeTrajectory(config)
   state.prompts = newSeq[string](config.players.len)
   state.scripted = newSeq[ScriptKind](config.players.len)
   runtimeConfigGlobal = runtimeConfig
