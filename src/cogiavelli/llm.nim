@@ -22,11 +22,12 @@
 ## certification still completes - this fallback is load-bearing.
 
 import
-  std/[algorithm, json, os, strutils, unicode],
+  std/[algorithm, json, options, os, strutils, times, unicode],
   bitworld/runtime,
   curly,
   prompts,
-  sim
+  sim,
+  training
 
 const
   AnthropicUrl = "https://api.anthropic.com/v1/messages"
@@ -80,6 +81,7 @@ type
     maxOutputTokens: int
     timeoutSeconds: int
     disabled*: bool
+    nativeAttempts*: seq[seq[DecisionAttempt]]
 
 ## FITTED, not chosen: every value below is the argmax of the grid in
 ## `tools/tune_baseline.nim`, recorded in `docs/tuning.md` and re-checked by
@@ -982,6 +984,8 @@ proc decideAll*(
   ## One decision per seat in `seats`, in order, from ONE parallel batch.
   ## Never raises: any failure falls back to the scripted baseline so the
   ## episode always advances. `prompts` and `scripted` are indexed by SEAT.
+  let capture = getEnv(CogameSaveTrajectoryUriEnv).len > 0
+  if capture: client.nativeAttempts = newSeq[seq[DecisionAttempt]](Seats)
   result = newSeq[Decision](seats.len)
   var open: seq[int]
   for index, seat in seats:
@@ -994,7 +998,9 @@ proc decideAll*(
   for attempt in 0 .. 1:
     if open.len == 0 or client.disabled:
       break
+    let started = epochTime()
     var batch: RequestBatch
+    var pendingEvidence: seq[DecisionAttempt]
     for index in open:
       let seat = seats[index]
       var user =
@@ -1003,22 +1009,51 @@ proc decideAll*(
       if attempt > 0:
         user.add(InvalidHint)
       let request = client.requestFor(systemPrompt(sim, seat, selection), user, seat)
+      if capture:
+        pendingEvidence.add(nativeAttempt(sim.config.players[seat].name,
+          sim.events.len, seat, attempt, request.body))
       batch.post(request.url, request.headers, request.body, $index)
     let responses = client.curl.makeRequests(batch, client.timeoutSeconds)
+    let latency = int((epochTime() - started) * 1000.0)
     var stillOpen: seq[int]
     for position, index in open:
       let seat = seats[index]
+      var evidence: DecisionAttempt
+      if capture: evidence = pendingEvidence[position]
       try:
+        if capture:
+          evidence.receiveNativeResponse(responses[position].response,
+            responses[position].error, latency)
         let text = client.textOf(responses[position].response,
           responses[position].error, batch[position].url)
         let payload = extractJsonObject(text)
         result[index] =
           if phase == phPress: parsePress(sim, seat, payload)
           else: parseOrdersReply(sim, seat, payload)
+        if capture:
+          evidence.parsedAction = result[index].decisionReply(phase)
+          # Fill only schema-optional omissions in this comparison. Keep the
+          # original response and request unchanged; repairs still fail equality.
+          var candidate = copy(payload)
+          let defaults = if phase == phPress:
+            %*{"broadcast": "", "letters": [], "pledges": [], "notes": ""}
+            else: %*{"spend": [], "builds": [], "notes": ""}
+          for key, value in defaults:
+            if not candidate.hasKey(key): candidate[key] = value
+          if phase == phPress and candidate["pledges"].kind == JArray:
+            for pledge in candidate["pledges"]:
+              if pledge.kind == JObject:
+                if not pledge.hasKey("province"): pledge["province"] = %""
+                if not pledge.hasKey("to"): pledge["to"] = %""
+          evidence.accepted = candidate == evidence.parsedAction
+          if not evidence.accepted:
+            evidence.rejectionReason = some("native parser normalized the proposal")
       except CatchableError as error:
+        if capture: evidence.rejectionReason = some(error.msg)
         echo "cogiavelli llm: seat ", seat, " attempt ", attempt, " failed: ",
           error.msg
         stillOpen.add(index)
+      if capture: client.nativeAttempts[seat].add(evidence)
     open = stillOpen
   for index in open:
     let seat = seats[index]
